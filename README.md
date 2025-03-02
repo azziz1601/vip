@@ -1,7 +1,7 @@
 
 
 ### INSTALL SCRIPT 
-<pre><code>apt install -y && apt update -y && apt upgrade -y && apt install lolcat -y && gem install lolcat && wget -q https://raw.githubusercontent.com/azziz1601/vip/main/install.sh && chmod +x install.sh && ./install.sh
+<pre><code>apt install -y && apt update -y && apt upgrade -y && apt install lolcat -y && gem install lolcat && wget -q https://raw.githubusercontent.com/azziz1601/vip/main/setup.sh && chmod +x setup.sh.sh && ./setup.sh
 </code></pre>
 
 ### LINK UPDATE 

@@ -252,22 +252,21 @@ function base_package() {
     apt update -y
     apt upgrade -y
     apt dist-upgrade -y
-    systemctl enable chrony
-    systemctl restart chrony
-    chronyc sourcestats -v
-    chronyc tracking -v
     apt install ntpdate -y
     ntpdate pool.ntp.org
     apt install sudo -y
     sudo apt-get clean all
     sudo apt-get autoremove -y
     sudo apt-get install -y debconf-utils
-    sudo apt-get remove --purge exim4 apache2 -y
+    sudo apt-get remove --purge exim4 -y
     sudo apt-get remove --purge ufw firewalld -y
     sudo apt-get install -y --no-install-recommends software-properties-common
     echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections
     echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections
 	apt-get -y install iptables iptables-persistent netfilter-persistent figlet ruby libxml-parser-perl squid nmap screen curl jq bzip2 gzip coreutils rsyslog iftop htop zip unzip net-tools sed gnupg gnupg1 bc apt-transport-https build-essential dirmngr libxml-parser-perl neofetch screenfetch lsof openssl openvpn easy-rsa fail2ban tmux dropbear socat cron bash-completion ntpdate xz-utils gnupg2 dnsutils lsb-release chrony libnss3-dev libnspr4-dev pkg-config libpam0g-dev libcap-ng-dev libcap-ng-utils libselinux1-dev libcurl4-openssl-dev flex bison make libnss3-tools libevent-dev xl2tpd apt git speedtest-cli p7zip-full libjpeg-dev zlib1g-dev python-is-python3 python3-pip shc build-essential nodejs nginx php php-fpm php-cli php-mysql p7zip-full squid libcurl4-openssl-dev lsb-release gawk
+	apt purge apache2 -y
+	chronyc sourcestats -v
+    chronyc tracking -v
   print_success "Packet Yang Dibutuhkan"
     
 }
@@ -959,7 +958,6 @@ clear
     menu
     profile
     enable_services
-    restart_system
 }
 instal
 echo ""
