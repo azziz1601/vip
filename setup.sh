@@ -22,7 +22,7 @@ green='\e[0;32m'
 clear
   # // Exporint IP AddressInformation
 export IP=$( curl -sS icanhazip.com )
-
+echo "$IP" >/usr/bin/.ipvps
 # // Clear Data
 clear
 clear && clear && clear
@@ -209,7 +209,7 @@ function first_setup(){
     sudo apt update -y
     apt-get install --no-install-recommends software-properties-common
     add-apt-repository ppa:vbernat/haproxy-2.0 -y
-    apt-get -y install haproxy=2.0.\*
+    apt-get -y install haproxy
 elif [[ $(cat /etc/os-release | grep -w ID | head -n1 | sed 's/=//g' | sed 's/"//g' | sed 's/ID//g') == "debian" ]]; then
     echo "Setup Dependencies For OS Is $(cat /etc/os-release | grep -w PRETTY_NAME | head -n1 | sed 's/=//g' | sed 's/"//g' | sed 's/PRETTY_NAME//g')"
     curl https://haproxy.debian.net/bernat.debian.org.gpg |
@@ -218,7 +218,7 @@ elif [[ $(cat /etc/os-release | grep -w ID | head -n1 | sed 's/=//g' | sed 's/"/
         http://haproxy.debian.net buster-backports-1.8 main \
         >/etc/apt/sources.list.d/haproxy.list
     sudo apt-get update
-    apt-get -y install haproxy=1.8.\*
+    apt-get -y install haproxy
 else
     echo -e " Your OS Is Not Supported ($(cat /etc/os-release | grep -w PRETTY_NAME | head -n1 | sed 's/=//g' | sed 's/"//g' | sed 's/PRETTY_NAME//g') )"
     exit 1
@@ -247,13 +247,11 @@ function base_package() {
     clear
     ########
     print_install "Menginstall Packet Yang Dibutuhkan"
-    apt install zip pwgen openssl netcat socat cron bash-completion -y
+    apt install zip pwgen openssl socat cron bash-completion -y
     apt install figlet -y
     apt update -y
     apt upgrade -y
     apt dist-upgrade -y
-    systemctl enable chronyd
-    systemctl restart chronyd
     systemctl enable chrony
     systemctl restart chrony
     chronyc sourcestats -v
@@ -264,13 +262,13 @@ function base_package() {
     sudo apt-get clean all
     sudo apt-get autoremove -y
     sudo apt-get install -y debconf-utils
-    sudo apt-get remove --purge exim4 -y
+    sudo apt-get remove --purge exim4 apache2 -y
     sudo apt-get remove --purge ufw firewalld -y
     sudo apt-get install -y --no-install-recommends software-properties-common
     echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections
     echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections
-    sudo apt-get install -y speedtest-cli vnstat libnss3-dev libnspr4-dev pkg-config libpam0g-dev libcap-ng-dev libcap-ng-utils libselinux1-dev libcurl4-nss-dev flex bison make libnss3-tools libevent-dev bc rsyslog dos2unix zlib1g-dev libssl-dev libsqlite3-dev sed dirmngr libxml-parser-perl build-essential gcc g++ python htop lsof tar wget curl ruby zip unzip p7zip-full python3-pip libc6 util-linux build-essential msmtp-mta ca-certificates bsd-mailx iptables iptables-persistent netfilter-persistent net-tools openssl ca-certificates gnupg gnupg2 ca-certificates lsb-release gcc shc make cmake git screen socat xz-utils apt-transport-https gnupg1 dnsutils cron bash-completion ntpdate chrony jq openvpn easy-rsa
-    print_success "Packet Yang Dibutuhkan"
+	apt-get -y install iptables iptables-persistent netfilter-persistent figlet ruby libxml-parser-perl squid nmap screen curl jq bzip2 gzip coreutils rsyslog iftop htop zip unzip net-tools sed gnupg gnupg1 bc apt-transport-https build-essential dirmngr libxml-parser-perl neofetch screenfetch lsof openssl openvpn easy-rsa fail2ban tmux dropbear socat cron bash-completion ntpdate xz-utils gnupg2 dnsutils lsb-release chrony libnss3-dev libnspr4-dev pkg-config libpam0g-dev libcap-ng-dev libcap-ng-utils libselinux1-dev libcurl4-openssl-dev flex bison make libnss3-tools libevent-dev xl2tpd apt git speedtest-cli p7zip-full libjpeg-dev zlib1g-dev python-is-python3 python3-pip shc build-essential nodejs nginx php php-fpm php-cli php-mysql p7zip-full squid libcurl4-openssl-dev lsb-release gawk
+  print_success "Packet Yang Dibutuhkan"
     
 }
 clear
@@ -374,7 +372,7 @@ rm -rf /etc/vmess/.vmess.db
 #Instal Xray
 function install_xray() {
 clear
-    print_install "Core Xray 1.8.1 Latest Version"
+    print_install "Core Xray 24.11.31 Latest Version"
     # install xray
     #echo -e "[ ${green}INFO$NC ] Downloading & Installing xray core"
     domainSock_dir="/run/xray";! [ -d $domainSock_dir ] && mkdir  $domainSock_dir
@@ -382,7 +380,7 @@ clear
     
     # / / Ambil Xray Core Version Terbaru
 latest_version="$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases | grep tag_name | sed -E 's/.*"v(.*)".*/\1/' | head -n 1)"
-bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install -u www-data --version $latest_version
+bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install -u www-data --version 24.11.30
  
     # // Ambil Config Server
     wget -O /etc/xray/config.json "${REPO}limit/config.json" >/dev/null 2>&1
@@ -391,7 +389,7 @@ bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release
     #chmod +x /usr/local/bin/xray
     domain=$(cat /etc/xray/domain)
     IPVS=$(cat /etc/xray/ipvps)
-    print_success "Core Xray 1.8.1 Latest Version"
+    print_success "Core Xray 24.11.31 Latest Version"
     
     # Settings UP Nginix Server
     clear
@@ -760,6 +758,8 @@ print_install "Menginstall ePro WebSocket Proxy"
     chmod +x /etc/systemd/system/ws.service
     chmod +x /usr/bin/ws
     chmod 644 /usr/bin/tun.conf
+	echo "ZE-VPN STORE TUNNEL" >/etc/handeling
+	echo "green">>/etc/handeling
 systemctl disable ws
 systemctl stop ws
 systemctl enable ws
@@ -769,6 +769,7 @@ wget -q -O /usr/local/share/xray/geosite.dat "https://github.com/Loyalsoldier/v2
 wget -q -O /usr/local/share/xray/geoip.dat "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat" >/dev/null 2>&1
 wget -O /usr/sbin/ftvpn "${REPO}limit/ftvpn" >/dev/null 2>&1
 chmod +x /usr/sbin/ftvpn
+wget -q ${REPO}limit/setrsyslog.sh && chmod +x setrsyslog.sh && ./setrsyslog.sh
 iptables -A FORWARD -m string --string "get_peers" --algo bm -j DROP
 iptables -A FORWARD -m string --string "announce_peer" --algo bm -j DROP
 iptables -A FORWARD -m string --string "find_node" --algo bm -j DROP
