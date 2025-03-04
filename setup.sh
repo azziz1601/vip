@@ -33,7 +33,7 @@ echo -e "${YELLOW}----------------------------------------------------------${NC
 echo -e "  Welcome To Ze Vpn Tunneling ${YELLOW}(${NC}${green} Stable Edition ${NC}${YELLOW})${NC}"
 echo -e " This Will Quick Setup VPN Server On Your Server"
 echo -e "  Auther : ${green}® ${NC}${YELLOW}(${NC} ${green} Ze VPN Tunneling ${NC}${YELLOW})${NC}"
-echo -e " © Recode By My Self AdijayaStoreVPN Tunneling${YELLOW}(${NC} 2025 ${YELLOW})${NC}"
+echo -e " © Recode By My Self ZeStoreVPN Tunneling${YELLOW}(${NC} 2025 ${YELLOW})${NC}"
 echo -e "${YELLOW}----------------------------------------------------------${NC}"
 echo ""
 sleep 2
