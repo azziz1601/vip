@@ -78,7 +78,7 @@ grenbo="\e[92;1m"
 NC='\e[0m'
 
 echo ""
-figlet ZA-ZTORE | lolcat
+figlet ZE VPN STORE | lolcat
 echo -e "\033[1;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
 echo -e " \e[1;97;101m          ADD BOT PANEL          \e[0m"
 echo -e "\033[1;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
