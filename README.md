@@ -4,6 +4,10 @@
 <pre><code>apt install -y && apt update -y && apt upgrade -y && apt install -y lolcat wget curl jq && gem install lolcat && wget -q https://raw.githubusercontent.com/azziz1601/vip/main/setup.sh && chmod +x setup.sh && ./setup.sh
 </code></pre>
 
+### INSTALL SCRIPT 
+<pre><code>apt install -y && apt install curl jq wget screen build-essential -y && apt update -y && apt upgrade -y && apt install -y lolcat wget curl jq && gem install lolcat && wget -q https://raw.githubusercontent.com/azziz1601/vip/main/setup.sh && chmod +x setup.sh && screen -S install ./setup.sh
+</code></pre>
+
 ### LINK UPDATE 
 ```
 wget -q https://raw.githubusercontent.com/azziz1601/vip/main/update.sh && chmod +x update.sh && ./update.sh
