@@ -1,0 +1,17 @@
+[Unit]
+Description=ZeVPN Unified Xray Quota Limit Daemon (Rust)
+After=network-online.target xray.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/zevpn-limit --interval 5 --flush-interval 30
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+MemoryMax=16M
+CPUQuota=5%
+
+[Install]
+WantedBy=multi-user.target

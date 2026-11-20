@@ -1,26 +1,42 @@
-REPO="https://raw.githubusercontent.com/azziz1601/vip/main/"
-wget -q -O /etc/systemd/system/limitvmess.service "${REPO}limit/limitvmess.service" && chmod +x limitvmess.service >/dev/null 2>&1
-wget -q -O /etc/systemd/system/limitvless.service "${REPO}limit/limitvless.service" && chmod +x limitvless.service >/dev/null 2>&1
-wget -q -O /etc/systemd/system/limittrojan.service "${REPO}limit/limittrojan.service" && chmod +x limittrojan.service >/dev/null 2>&1
-wget -q -O /etc/systemd/system/limitshadowsocks.service "${REPO}limit/limitshadowsocks.service" && chmod +x limitshadowsocks.service >/dev/null 2>&1
-wget -q -O /etc/xray/limit.vmess "${REPO}limit/vmess" >/dev/null 2>&1
-wget -q -O /etc/xray/limit.vless "${REPO}limit/vless" >/dev/null 2>&1
-wget -q -O /etc/xray/limit.trojan "${REPO}limit/trojan" >/dev/null 2>&1
-wget -q -O /etc/xray/limit.shadowsocks "${REPO}limit/shadowsocks" >/dev/null 2>&1
-chmod +x /etc/xray/limit.vmess
-chmod +x /etc/xray/limit.vless
-chmod +x /etc/xray/limit.trojan
-chmod +x /etc/xray/limit.shadowsocks
+#!/bin/bash
+set -euo pipefail
+
+GITHUB_REPO="${GITHUB_REPO:-azziz1601/vip}"
+VERSION="${VERSION:-latest}"
+RAW_REPO="https://raw.githubusercontent.com/${GITHUB_REPO}/main/"
+
+ARCH="$(uname -m)"
+case "$ARCH" in
+    x86_64)  ASSET="zevpn-limit-linux-amd64" ;;
+    aarch64) ASSET="zevpn-limit-linux-arm64" ;;
+    *)
+        echo "Arsitektur tidak didukung: $ARCH"
+        exit 1
+        ;;
+esac
+
+if [ "$VERSION" = "latest" ]; then
+    BIN_URL="https://github.com/${GITHUB_REPO}/releases/latest/download/${ASSET}"
+else
+    BIN_URL="https://github.com/${GITHUB_REPO}/releases/download/${VERSION}/${ASSET}"
+fi
+
+# Nonaktifkan 4 service bash lama jika masih ada
+for svc in limitvmess limitvless limittrojan limitshadowsocks; do
+    systemctl disable --now "$svc" >/dev/null 2>&1 || true
+    rm -f "/etc/systemd/system/${svc}.service"
+done
+rm -f /etc/xray/limit.vmess /etc/xray/limit.vless /etc/xray/limit.trojan /etc/xray/limit.shadowsocks
+
+# Unduh binary Rust statis secara atomik agar aman saat update service yang sedang berjalan
+TMP_BIN="/usr/local/bin/zevpn-limit.tmp.$$"
+curl -fsSL "$BIN_URL" -o "$TMP_BIN"
+chmod +x "$TMP_BIN"
+mv -f "$TMP_BIN" /usr/local/bin/zevpn-limit
+
+# Pasang/perbarui systemd service tunggal
+curl -fsSL "${RAW_REPO}limit/zevpn-limit.service" -o /etc/systemd/system/zevpn-limit.service
+
 systemctl daemon-reload
-systemctl enable --now limitvmess
-systemctl enable --now limitvless
-systemctl enable --now limittrojan
-systemctl enable --now limitshadowsocks
-# systemctl start limitvmess
-# systemctl start limitvless
-# systemctl start limittrojan
-# systemctl start limitshadowsocks
-# systemctl restart limitvmess
-# systemctl restart limitvless
-# systemctl restart limittrojan
-# systemctl restart limitshadowsocks
+systemctl enable zevpn-limit >/dev/null 2>&1 || true
+systemctl restart zevpn-limit

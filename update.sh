@@ -2,6 +2,8 @@
 dateFromServer=$(curl -v --insecure --silent https://google.com/ 2>&1 | grep Date | sed -e 's/< Date: //')
 biji=`date +"%Y-%m-%d" -d "$dateFromServer"`
 red() { echo -e "\\033[32;1m${*}\\033[0m"; }
+GITHUB_REPO="${GITHUB_REPO:-azziz1601/vip}"
+RAW_REPO="https://raw.githubusercontent.com/${GITHUB_REPO}/main/"
 clear
 fun_bar() {
     CMD[0]="$1"
@@ -30,12 +32,18 @@ fun_bar() {
     tput cnorm
 }
 res1() {
-    wget https://raw.githubusercontent.com/azziz1601/vip/main/limit/menu.zip
-    unzip menu.zip
+    wget -q "${RAW_REPO}limit/menu.zip"
+    unzip -o -q menu.zip
     chmod +x menu/*
-    mv menu/* /usr/local/sbin
-    rm -rf menu
-    rm -rf menu.zip
+    mv -f menu/* /usr/local/sbin
+    rm -rf menu menu.zip
+
+    # Migrasi / perbarui daemon Rust zevpn-limit otomatis dari GitHub Releases
+    curl -fsSL "${RAW_REPO}limit/limit.sh" -o /tmp/zevpn-limit-update.sh
+    chmod +x /tmp/zevpn-limit-update.sh
+    GITHUB_REPO="$GITHUB_REPO" bash /tmp/zevpn-limit-update.sh
+    rm -f /tmp/zevpn-limit-update.sh
+
     rm -rf update.sh
 }
 netfilter-persistent
@@ -44,7 +52,7 @@ echo -e "\033[1;36m━━━━━━━━━━━━━━━━━━━━�
 echo -e " \e[1;97;101m          UPDATE SCRIPT    \e[0m"
 echo -e "\033[1;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
 echo -e ""
-echo -e "  \033[1;91m update script service\033[1;37m"
+echo -e "  \033[1;91m update script & zevpn-limit service\033[1;37m"
 fun_bar 'res1'
 echo -e "\033[1;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
 echo -e ""

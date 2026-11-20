@@ -1,0 +1,5 @@
+zevpn-limit/target/
+zevpn-limit/Cargo.lock
+dist/
+*.swp
+.DS_Store

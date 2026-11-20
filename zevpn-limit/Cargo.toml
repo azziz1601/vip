@@ -1,0 +1,18 @@
+[package]
+name = "zevpn-limit"
+version = "0.2.0"
+edition = "2021"
+description = "Ultra-lightweight Rust daemon replacing Xray bash quota limit services (vmess, vless, trojan, shadowsocks)"
+license = "MIT"
+
+[dependencies]
+prost = "0.13"
+tokio = { version = "1", features = ["rt", "macros", "time", "signal", "process"] }
+tonic = { version = "0.12", default-features = false, features = ["transport", "codegen", "prost"] }
+
+[profile.release]
+opt-level = "s"
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true
