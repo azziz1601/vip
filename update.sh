@@ -31,6 +31,40 @@ fun_bar() {
     echo -e "\033[0;33m]\033[1;37m -\033[1;32m OK !\033[1;37m"
     tput cnorm
 }
+update_udpgw_rust() {
+    # Lewati otomatis jika UDPGW versi Rust sudah terpasang
+    if [[ -x /usr/local/kyt/udp-mini ]] && /usr/local/kyt/udp-mini --version 2>&1 | grep -q "badvpn-udpgw-rs"; then
+        return 0
+    fi
+
+    local udpgw_url=""
+    case "$(uname -m)" in
+        x86_64|amd64)
+            udpgw_url="https://github.com/azziz1601/badvpn-udpgw-rs/releases/download/v1.2.0/badvpn-udpgw-linux-amd64"
+            ;;
+        aarch64|arm64)
+            udpgw_url="https://github.com/azziz1601/badvpn-udpgw-rs/releases/download/v1.2.0/badvpn-udpgw-linux-arm64"
+            ;;
+        *)
+            return 0
+            ;;
+    esac
+
+    mkdir -p /usr/local/kyt
+    if (curl -fsSL "$udpgw_url" -o /tmp/udp-mini.new || wget -q -O /tmp/udp-mini.new "$udpgw_url"); then
+        chmod +x /tmp/udp-mini.new
+        if /tmp/udp-mini.new --version 2>&1 | grep -q "badvpn-udpgw-rs"; then
+            systemctl stop udp-mini-1 udp-mini-2 udp-mini-3 >/dev/null 2>&1
+            mv -f /tmp/udp-mini.new /usr/local/kyt/udp-mini
+            systemctl daemon-reload >/dev/null 2>&1
+            systemctl restart udp-mini-1 udp-mini-2 udp-mini-3 >/dev/null 2>&1
+        else
+            rm -f /tmp/udp-mini.new
+        fi
+    else
+        rm -f /tmp/udp-mini.new
+    fi
+}
 res1() {
     wget -q "${RAW_REPO}limit/menu.zip"
     unzip -o -q menu.zip
@@ -44,6 +78,9 @@ res1() {
     GITHUB_REPO="$GITHUB_REPO" bash /tmp/zevpn-limit-update.sh
     rm -f /tmp/zevpn-limit-update.sh
 
+    # Migrasi otomatis ke UDPGW Rust v1.2.0 (skip jika sudah terpasang)
+    update_udpgw_rust
+
     rm -rf update.sh
 }
 netfilter-persistent
@@ -52,7 +89,7 @@ echo -e "\033[1;36m━━━━━━━━━━━━━━━━━━━━�
 echo -e " \e[1;97;101m          UPDATE SCRIPT    \e[0m"
 echo -e "\033[1;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
 echo -e ""
-echo -e "  \033[1;91m update script & zevpn-limit service\033[1;37m"
+echo -e "  \033[1;91m update script, zevpn-limit & udpgw-rs\033[1;37m"
 fun_bar 'res1'
 echo -e "\033[1;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
 echo -e ""

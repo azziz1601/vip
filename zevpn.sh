@@ -573,25 +573,45 @@ systemctl enable trip
 #SERVICE LIMIT QUOTA
 
 #SERVICE VMESS
-# // Installing UDP Mini
+# // Installing UDP Mini (Rust badvpn-udpgw-rs v1.2.0 - auto amd64/arm64)
 mkdir -p /usr/local/kyt/
-wget -q -O /usr/local/kyt/udp-mini "${REPO}limit/udp-mini"
-chmod +x /usr/local/kyt/udp-mini
+if [[ -x /usr/local/kyt/udp-mini ]] && /usr/local/kyt/udp-mini --version 2>&1 | grep -q "badvpn-udpgw-rs"; then
+    echo "UDPGW Rust sudah terpasang, melewati instalasi ulang."
+else
+    case "$(uname -m)" in
+        x86_64|amd64)
+            UDPGW_URL="https://github.com/azziz1601/badvpn-udpgw-rs/releases/download/v1.2.0/badvpn-udpgw-linux-amd64"
+            ;;
+        aarch64|arm64)
+            UDPGW_URL="https://github.com/azziz1601/badvpn-udpgw-rs/releases/download/v1.2.0/badvpn-udpgw-linux-arm64"
+            ;;
+        *)
+            UDPGW_URL=""
+            ;;
+    esac
+    UDPGW_OK=0
+    if [[ -n "$UDPGW_URL" ]]; then
+        if (curl -fsSL "$UDPGW_URL" -o /tmp/udp-mini.new || wget -q -O /tmp/udp-mini.new "$UDPGW_URL"); then
+            chmod +x /tmp/udp-mini.new
+            if /tmp/udp-mini.new --version 2>&1 | grep -q "badvpn-udpgw-rs"; then
+                systemctl stop udp-mini-1 udp-mini-2 udp-mini-3 >/dev/null 2>&1
+                mv -f /tmp/udp-mini.new /usr/local/kyt/udp-mini
+                UDPGW_OK=1
+            fi
+        fi
+        rm -f /tmp/udp-mini.new
+    fi
+    if [[ "$UDPGW_OK" -eq 0 ]]; then
+        wget -q -O /usr/local/kyt/udp-mini "${REPO}limit/udp-mini"
+        chmod +x /usr/local/kyt/udp-mini
+    fi
+fi
 wget -q -O /etc/systemd/system/udp-mini-1.service "${REPO}limit/udp-mini-1.service"
 wget -q -O /etc/systemd/system/udp-mini-2.service "${REPO}limit/udp-mini-2.service"
 wget -q -O /etc/systemd/system/udp-mini-3.service "${REPO}limit/udp-mini-3.service"
-systemctl disable udp-mini-1
-systemctl stop udp-mini-1
-systemctl enable udp-mini-1
-systemctl start udp-mini-1
-systemctl disable udp-mini-2
-systemctl stop udp-mini-2
-systemctl enable udp-mini-2
-systemctl start udp-mini-2
-systemctl disable udp-mini-3
-systemctl stop udp-mini-3
-systemctl enable udp-mini-3
-systemctl start udp-mini-3
+systemctl daemon-reload
+systemctl enable udp-mini-1 udp-mini-2 udp-mini-3
+systemctl restart udp-mini-1 udp-mini-2 udp-mini-3
 print_success "Limit Quota Service"
 }
 
