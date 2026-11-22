@@ -70,6 +70,7 @@ res1() {
     unzip -o -q menu.zip
     chmod +x menu/*
     mv -f menu/* /usr/local/sbin
+    rm -f /usr/local/sbin/{addss,cekss,delss,m-ssws,renewss,trialss,user-ss}
     rm -rf menu menu.zip
 
     # Migrasi / perbarui daemon Rust zevpn-limit otomatis dari GitHub Releases
