@@ -106,7 +106,7 @@ sync_multi_transport_configs() {
     # 1. Upgrade /etc/nginx/conf.d/xray.conf jika belum punya /upvmess atau /vmess-xhttp
     if [[ -f /etc/nginx/conf.d/xray.conf ]] && ! grep -q "/vmess-xhttp" /etc/nginx/conf.d/xray.conf; then
         cp -f /etc/nginx/conf.d/xray.conf /etc/nginx/conf.d/xray.conf.bak
-        if curl -fsSL "${RAW_REPO}limit/xray.conf" -o /tmp/xray.conf.new; then
+        if curl -fsSL -H "Cache-Control: no-cache" "${RAW_REPO}limit/xray.conf?t=$(date +%s)" -o /tmp/xray.conf.new; then
             sed -i "s/xxx/${domain}/g" /tmp/xray.conf.new
             mv -f /tmp/xray.conf.new /etc/nginx/conf.d/xray.conf
             if nginx -t >/dev/null 2>&1; then
@@ -121,7 +121,7 @@ sync_multi_transport_configs() {
     # 2. Upgrade /etc/haproxy/haproxy.cfg jika belum punya ACL is_xhttp
     if [[ -f /etc/haproxy/haproxy.cfg ]] && ! grep -q "is_xhttp" /etc/haproxy/haproxy.cfg; then
         cp -f /etc/haproxy/haproxy.cfg /etc/haproxy/haproxy.cfg.bak
-        if curl -fsSL "${RAW_REPO}limit/haproxy.cfg" -o /tmp/haproxy.cfg.new; then
+        if curl -fsSL -H "Cache-Control: no-cache" "${RAW_REPO}limit/haproxy.cfg?t=$(date +%s)" -o /tmp/haproxy.cfg.new; then
             mv -f /tmp/haproxy.cfg.new /etc/haproxy/haproxy.cfg
             if haproxy -c -f /etc/haproxy/haproxy.cfg >/dev/null 2>&1; then
                 systemctl reload haproxy >/dev/null 2>&1 || systemctl restart haproxy >/dev/null 2>&1
@@ -146,7 +146,7 @@ sync_multi_transport_configs() {
     # 3. Sinkronkan /etc/xray/config.json: tambahkan inbound HTTPUpgrade & XHTTP + klon user eksisting
     if [[ -f /etc/xray/config.json ]] && ! grep -q "#vmessxhttp" /etc/xray/config.json; then
         cp -f /etc/xray/config.json /etc/xray/config.json.bak
-        if curl -fsSL "${RAW_REPO}limit/config.json" -o /tmp/xray-config.base.json; then
+        if curl -fsSL -H "Cache-Control: no-cache" "${RAW_REPO}limit/config.json?t=$(date +%s)" -o /tmp/xray-config.base.json; then
             # Klon seluruh user eksisting dari config lama ke semua transport baru
             awk '/^#& /{h=$0; getline; print h "\n" $0}' /etc/xray/config.json.bak | sort -u > /tmp/vless.users.tmp
             awk '/^### /{h=$0; getline; print h "\n" $0}' /etc/xray/config.json.bak | sort -u > /tmp/vmess.users.tmp
@@ -191,12 +191,17 @@ PYMERGE
     fi
 }
 res1() {
-    wget -q "${RAW_REPO}limit/menu.zip"
-    unzip -o -q menu.zip
-    chmod +x menu/*
-    mv -f menu/* /usr/local/sbin
-    rm -f /usr/local/sbin/{addss,cekss,delss,m-ssws,renewss,trialss,user-ss}
-    rm -rf menu menu.zip
+    local ts
+    ts=$(date +%s)
+    rm -rf /tmp/vip-menu-upd /tmp/vip-menu-upd.zip
+    mkdir -p /tmp/vip-menu-upd
+    if curl -fsSL -H "Cache-Control: no-cache" "${RAW_REPO}limit/menu.zip?t=${ts}" -o /tmp/vip-menu-upd.zip || wget -q --no-cache -O /tmp/vip-menu-upd.zip "${RAW_REPO}limit/menu.zip?t=${ts}"; then
+        unzip -o -q /tmp/vip-menu-upd.zip -d /tmp/vip-menu-upd
+        chmod +x /tmp/vip-menu-upd/menu/*
+        mv -f /tmp/vip-menu-upd/menu/* /usr/local/sbin/
+        rm -f /usr/local/sbin/{addss,cekss,delss,m-ssws,renewss,trialss,user-ss}
+    fi
+    rm -rf /tmp/vip-menu-upd /tmp/vip-menu-upd.zip
 
     # Migrasi / perbarui daemon Rust zevpn-limit otomatis dari GitHub Releases
     curl -fsSL "${RAW_REPO}limit/limit.sh" -o /tmp/zevpn-limit-update.sh
@@ -213,7 +218,7 @@ res1() {
     # Sinkronisasi multi-transport (WS, gRPC, HTTPUpgrade, XHTTP) + migrasi akun lama
     sync_multi_transport_configs
 
-    rm -rf update.sh
+    rm -rf update.sh /tmp/update.sh
 }
 netfilter-persistent
 clear

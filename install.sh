@@ -872,12 +872,13 @@ print_success "All Packet"
 function menu(){
     clear
     print_install "Memasang Menu Packet"
-    wget ${REPO}limit/menu.zip
-    unzip menu.zip
-    chmod +x menu/*
-    mv menu/* /usr/local/sbin
-    rm -rf menu
-    rm -rf menu.zip
+    rm -rf /tmp/vip-menu /tmp/menu.zip
+    mkdir -p /tmp/vip-menu
+    wget -q --no-cache -O /tmp/menu.zip "${REPO}limit/menu.zip?t=$(date +%s)"
+    unzip -o -q /tmp/menu.zip -d /tmp/vip-menu
+    chmod +x /tmp/vip-menu/menu/*
+    mv -f /tmp/vip-menu/menu/* /usr/local/sbin/
+    rm -rf /tmp/vip-menu /tmp/menu.zip
 }
 
 # Membaut Default Menu 
