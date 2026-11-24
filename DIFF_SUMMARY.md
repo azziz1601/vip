@@ -1,11 +1,11 @@
-# Diff Summary — `vip-main` (Fix Update Menu No-Cache + Fix Host Link VLESS + Multi-Transport)
+# Diff Summary — `vip-main` (Multi-Transport, Pemisah Garis & Seragamkan Return to Menu)
 
-Ringkasan perbaikan terbaru pada `azziz1601/vip` (seluruh installer, updater, menu, dan config tersinkronisasi penuh):
+Ringkasan lengkap pembaruan tersinkronisasi pada `azziz1601/vip`:
 
-## Perbaikan Terbaru
-- **`update.sh`, `menu/utility`, `setup.sh`, `install.sh`, `zevpn.sh`**:
-  - Mengunduh `update.sh`, `menu.zip`, `xray.conf`, `haproxy.cfg`, dan `config.json` ke path `/tmp` bersih dengan `-O` + header `Cache-Control: no-cache` + query `?t=$(date +%s)` agar tidak pernah tertimpa `menu.zip.1` / `update.sh.1` ataupun terkena cache CDN GitHub `raw.githubusercontent.com`.
-- **`menu/addvless` & `menu/trialvless`**:
-  - Menambahkan `&host=${domain}&sni=${domain}` pada `vlesslink1` (WS TLS), `&host=${domain}&security=none` pada `vlesslink2` (WS Non-TLS), dan `&host=${domain}` pada `vlesslink3` (gRPC) agar field Host tidak lagi kosong saat di-import ke aplikasi client.
-- **Sinkronisasi Penuh Multi-Transport, UDPGW Rust `v1.2.0` & Xray-Lite `v1.0.0`**:
-  - `limit/config.json` (13 inbound), `limit/xray.conf`, `limit/haproxy.cfg`, `limit/menu.zip` (WS, HTTPUpgrade, XHTTP, gRPC; tanpa Shadowsocks), serta auto-install & auto-migrasi `badvpn-udpgw-rs v1.2.0` dan `xray-lite-rs v1.0.0` pada `setup.sh`, `install.sh`, `zevpn.sh`, dan `update.sh`.
+## Pembaruan Terbaru
+- **Seragamkan navigasi kembali ke menu (`limit/menu.zip`)**:
+  - Menambahkan `read -n 1 -s -r -p "Press [ Enter ] to back on menu"` + `menu` pada seluruh skrip akun & monitoring (`addws`, `trialws`, `addvless`, `trialvless`, `addtr`, `trialtr`, `addssh`, `trial`, `cekws`, `cekvless`, `cektr`, `cekssh`, `change-vmess-qouta`, `change-vless-qouta`, `change-trojan-qouta`, `ganti-ip-vmess`, `ganti-ip-vless`, `ganti-ip-trojan`, `lock-vm`, `unlock-vm`, serta `ceklim`).
+- **Tampilan output multi-transport**:
+  - Pemisah garis `◇━━━━━━━━━━━━━━━━━◇` di antara `HTTPUpgrade TLS` / `HTTPUpgrade NTLS` dan `XHTTP TLS` / `XHTTP NTLS` di terminal (serta pemisah di notifikasi Telegram), plus perbaikan `&host=${domain}` pada link VLESS.
+- **Sinkronisasi penuh infrastruktur & biner Rust**:
+  - `setup.sh`, `install.sh`, `zevpn.sh`, `update.sh` (unduh no-cache `/tmp`, `xray-lite-rs v1.0.0`, `badvpn-udpgw-rs v1.2.0`, `xray.service` `ExecReload`), `limit/config.json` (13 inbound), `limit/xray.conf`, dan `limit/haproxy.cfg` tanpa Shadowsocks.
