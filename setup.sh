@@ -332,7 +332,6 @@ function make_folder_xray() {
 rm -rf /etc/vmess/.vmess.db
     rm -rf /etc/vless/.vless.db
     rm -rf /etc/trojan/.trojan.db
-    rm -rf /etc/shadowsocks/.shadowsocks.db
     rm -rf /etc/ssh/.ssh.db
     rm -rf /etc/bot/.bot.db
     mkdir -p /etc/bot
@@ -340,7 +339,6 @@ rm -rf /etc/vmess/.vmess.db
     mkdir -p /etc/vmess
     mkdir -p /etc/vless
     mkdir -p /etc/trojan
-    mkdir -p /etc/shadowsocks
     mkdir -p /etc/ssh
     mkdir -p /usr/bin/xray/
     mkdir -p /var/log/xray/
@@ -360,13 +358,11 @@ rm -rf /etc/vmess/.vmess.db
     touch /etc/vmess/.vmess.db
     touch /etc/vless/.vless.db
     touch /etc/trojan/.trojan.db
-    touch /etc/shadowsocks/.shadowsocks.db
     touch /etc/ssh/.ssh.db
     touch /etc/bot/.bot.db
     echo "& plughin Account" >>/etc/vmess/.vmess.db
     echo "& plughin Account" >>/etc/vless/.vless.db
     echo "& plughin Account" >>/etc/trojan/.trojan.db
-    echo "& plughin Account" >>/etc/shadowsocks/.shadowsocks.db
     echo "& plughin Account" >>/etc/ssh/.ssh.db
     }
 #Instal Xray
@@ -379,8 +375,32 @@ clear
     chown www-data.www-data $domainSock_dir
     
     # / / Ambil Xray Core Version Terbaru
-latest_version="$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases | grep tag_name | sed -E 's/.*"v(.*)".*/\1/' | head -n 1)"
-bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install -u www-data --version 24.11.30
+    # Pasang xray-lite-rs (auto amd64/arm64) dari GitHub Releases, fallback ke Xray-core jika release belum tersedia
+    XRAY_LITE_OK=0
+    case "$(uname -m)" in
+        x86_64|amd64)
+            XRAY_LITE_URL="https://github.com/azziz1601/xray-lite-rs/releases/download/v1.0.0/xray-lite-linux-amd64"
+            ;;
+        aarch64|arm64)
+            XRAY_LITE_URL="https://github.com/azziz1601/xray-lite-rs/releases/download/v1.0.0/xray-lite-linux-arm64"
+            ;;
+        *)
+            XRAY_LITE_URL=""
+            ;;
+    esac
+    if [[ -n "$XRAY_LITE_URL" ]]; then
+        if (curl -fsSL "$XRAY_LITE_URL" -o /tmp/xray-lite.new || wget -q -O /tmp/xray-lite.new "$XRAY_LITE_URL"); then
+            chmod +x /tmp/xray-lite.new
+            if /tmp/xray-lite.new --version 2>&1 | grep -q "xray-lite"; then
+                mv -f /tmp/xray-lite.new /usr/local/bin/xray
+                XRAY_LITE_OK=1
+            fi
+        fi
+        rm -f /tmp/xray-lite.new
+    fi
+    if [[ "$XRAY_LITE_OK" -eq 0 ]]; then
+        bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install -u www-data --version 24.11.30
+    fi
  
     # // Ambil Config Server
     wget -O /etc/xray/config.json "${REPO}limit/config.json" >/dev/null 2>&1
@@ -410,6 +430,7 @@ cat /etc/xray/xray.crt /etc/xray/xray.key | tee /etc/haproxy/hap.pem
     # > Create Service
     rm -rf /etc/systemd/system/xray.service.d
     cat >/etc/systemd/system/xray.service <<EOF
+[Unit]
 Description=Xray Service
 Documentation=https://github.com
 After=network.target nss-lookup.target
@@ -420,6 +441,7 @@ CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
 NoNewPrivileges=true
 ExecStart=/usr/local/bin/xray run -config /etc/xray/config.json
+ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartPreventExitStatus=23
 LimitNPROC=10000

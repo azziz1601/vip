@@ -153,7 +153,132 @@
                "serviceName": "trojan-grpc"
          }
       }
-   }
+   },
+      {
+        "listen": "127.0.0.1",
+        "port": "10009",
+        "protocol": "vless",
+        "settings": {
+          "decryption": "none",
+          "clients": [
+            {
+              "id": "1d1c1d94-6987-4658-a4dc-8821a30fe7e0"
+#vlesshu
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "httpupgrade",
+          "httpupgradeSettings": {
+            "path": "/upvless"
+          }
+        }
+      },
+      {
+        "listen": "127.0.0.1",
+        "port": "10010",
+        "protocol": "vmess",
+        "settings": {
+          "clients": [
+            {
+              "id": "1d1c1d94-6987-4658-a4dc-8821a30fe7e0",
+              "alterId": 0
+#vmesshu
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "httpupgrade",
+          "httpupgradeSettings": {
+            "path": "/upvmess"
+          }
+        }
+      },
+      {
+        "listen": "127.0.0.1",
+        "port": "10011",
+        "protocol": "trojan",
+        "settings": {
+          "decryption": "none",
+          "clients": [
+            {
+              "password": "1d1c1d94-6987-4658-a4dc-8821a30fe7e0"
+#trojanhu
+            }
+          ],
+          "udp": true
+        },
+        "streamSettings": {
+          "network": "httpupgrade",
+          "httpupgradeSettings": {
+            "path": "/uptrojan"
+          }
+        }
+      },
+      {
+        "listen": "127.0.0.1",
+        "port": "10016",
+        "protocol": "vless",
+        "settings": {
+          "decryption": "none",
+          "clients": [
+            {
+              "id": "1d1c1d94-6987-4658-a4dc-8821a30fe7e0"
+#vlessxhttp
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "xhttp",
+          "xhttpSettings": {
+            "path": "/vless-xhttp",
+            "mode": "auto"
+          }
+        }
+      },
+      {
+        "listen": "127.0.0.1",
+        "port": "10017",
+        "protocol": "vmess",
+        "settings": {
+          "clients": [
+            {
+              "id": "1d1c1d94-6987-4658-a4dc-8821a30fe7e0",
+              "alterId": 0
+#vmessxhttp
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "xhttp",
+          "xhttpSettings": {
+            "path": "/vmess-xhttp",
+            "mode": "auto"
+          }
+        }
+      },
+      {
+        "listen": "127.0.0.1",
+        "port": "10018",
+        "protocol": "trojan",
+        "settings": {
+          "decryption": "none",
+          "clients": [
+            {
+              "password": "1d1c1d94-6987-4658-a4dc-8821a30fe7e0"
+#trojanxhttp
+            }
+          ],
+          "udp": true
+        },
+        "streamSettings": {
+          "network": "xhttp",
+          "xhttpSettings": {
+            "path": "/trojan-xhttp",
+            "mode": "auto"
+          }
+        }
+      }
   ],
   "outbounds": [
     {
