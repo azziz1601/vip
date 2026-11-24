@@ -99,7 +99,7 @@ expx=$(curl https://raw.githubusercontent.com/azziz1601/izinsc/main/ip | grep $M
 echo "$expx" >/usr/bin/e
 # DETAIL ORDER
 username=$(cat /usr/bin/user)
-oid=$(cat /usr/bin/ver)
+oid=$(cat /usr/bin/ver 2>/dev/null)
 exp=$(cat /usr/bin/e)
 clear
 # CERTIFICATE STATUS

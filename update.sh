@@ -3,7 +3,11 @@ dateFromServer=$(curl -v --insecure --silent https://google.com/ 2>&1 | grep Dat
 biji=`date +"%Y-%m-%d" -d "$dateFromServer"`
 red() { echo -e "\\033[32;1m${*}\\033[0m"; }
 GITHUB_REPO="${GITHUB_REPO:-azziz1601/vip}"
-RAW_REPO="https://raw.githubusercontent.com/${GITHUB_REPO}/main/"
+if [[ -z "${VIP_REF:-}" ]]; then
+    VIP_REF=$(curl -fsSL -H "Accept: application/vnd.github.sha" "https://api.github.com/repos/${GITHUB_REPO}/commits/main" 2>/dev/null || true)
+fi
+[[ -z "$VIP_REF" || ${#VIP_REF} -lt 7 ]] && VIP_REF="main"
+RAW_REPO="https://raw.githubusercontent.com/${GITHUB_REPO}/${VIP_REF}/"
 clear
 fun_bar() {
     CMD[0]="$1"
@@ -204,7 +208,7 @@ res1() {
     rm -rf /tmp/vip-menu-upd /tmp/vip-menu-upd.zip
 
     # Migrasi / perbarui daemon Rust zevpn-limit otomatis dari GitHub Releases
-    curl -fsSL "${RAW_REPO}limit/limit.sh" -o /tmp/zevpn-limit-update.sh
+    curl -fsSL -H "Cache-Control: no-cache" -H "Pragma: no-cache" "${RAW_REPO}limit/limit.sh?t=$(date +%s)" -o /tmp/zevpn-limit-update.sh
     chmod +x /tmp/zevpn-limit-update.sh
     GITHUB_REPO="$GITHUB_REPO" bash /tmp/zevpn-limit-update.sh
     rm -f /tmp/zevpn-limit-update.sh
