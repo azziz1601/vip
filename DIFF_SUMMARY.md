@@ -1,11 +1,11 @@
-# Diff Summary — `vip-main` (Multi-Transport, Pemisah Garis & Seragamkan Return to Menu)
+# Diff Summary — `vip` (Integrasi `ws-rs` + Tuning Stabilitas Nginx/HAProxy)
 
-Ringkasan lengkap pembaruan tersinkronisasi pada `azziz1601/vip`:
-
-## Pembaruan Terbaru
-- **Seragamkan navigasi kembali ke menu (`limit/menu.zip`)**:
-  - Menambahkan `read -n 1 -s -r -p "Press [ Enter ] to back on menu"` + `menu` pada seluruh skrip akun & monitoring (`addws`, `trialws`, `addvless`, `trialvless`, `addtr`, `trialtr`, `addssh`, `trial`, `cekws`, `cekvless`, `cektr`, `cekssh`, `change-vmess-qouta`, `change-vless-qouta`, `change-trojan-qouta`, `ganti-ip-vmess`, `ganti-ip-vless`, `ganti-ip-trojan`, `lock-vm`, `unlock-vm`, serta `ceklim`).
-- **Tampilan output multi-transport**:
-  - Pemisah garis `◇━━━━━━━━━━━━━━━━━◇` di antara `HTTPUpgrade TLS` / `HTTPUpgrade NTLS` dan `XHTTP TLS` / `XHTTP NTLS` di terminal (serta pemisah di notifikasi Telegram), plus perbaikan `&host=${domain}` pada link VLESS.
-- **Sinkronisasi penuh infrastruktur & biner Rust**:
-  - `setup.sh`, `install.sh`, `zevpn.sh`, `update.sh` (unduh no-cache `/tmp`, `xray-lite-rs v1.0.0`, `badvpn-udpgw-rs v1.2.0`, `xray.service` `ExecReload`), `limit/config.json` (13 inbound), `limit/xray.conf`, dan `limit/haproxy.cfg` tanpa Shadowsocks.
+| File | Perubahan |
+|---|---|
+| `ws-rs/` | Implementasi ulang `/usr/bin/ws` berbasis Rust (static `musl`, 0 cek lisensi `.ipvps`, 2 dependency `tokio` + `socket2`, drop-in `tun.conf` & `ws.service`, runtime 1-vCPU). |
+| `.github/workflows/build-ws.yml` | Workflow GitHub Actions untuk `cargo test` + build & rilis otomatis `ws-linux-amd64` dan `ws-linux-arm64` static `musl` saat push tag `v*`. |
+| `setup.sh`, `install.sh`, `zevpn.sh` | Unduh otomatis `ws-linux-amd64`/`ws-linux-arm64` dari GitHub Releases `azziz1601/vip` (fallback ke `limit/ws` jika rilis belum tersedia). |
+| `update.sh` | Menambah `migrate_ws_rs()` otomatis saat update + blok 2a tuning stabilitas Nginx & HAProxy. |
+| `limit/nginx.conf` | Menambah `worker_shutdown_timeout 10s;` dan menaikkan `worker_connections 1024` → `4096`. |
+| `limit/xray.conf` | Mengubah `client_header_timeout` & `keepalive_timeout` dari `86400000m` → `360s`. |
+| `limit/haproxy.cfg` | Menghapus `option httplog` dan keyword `check` pada backend lokal `127.0.0.1` (menghilangkan false-down & broadcast `EMERG`). |

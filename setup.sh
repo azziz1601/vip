@@ -794,7 +794,26 @@ print_success "Fail2ban"
 function ins_epro(){
 clear
 print_install "Menginstall ePro WebSocket Proxy"
-    wget -O /usr/bin/ws "${REPO}limit/ws" >/dev/null 2>&1
+    WS_ARCH="$(uname -m)"
+    WS_URL=""
+    case "$WS_ARCH" in
+        x86_64|amd64)  WS_URL="https://github.com/azziz1601/vip/releases/latest/download/ws-linux-amd64" ;;
+        aarch64|arm64) WS_URL="https://github.com/azziz1601/vip/releases/latest/download/ws-linux-arm64" ;;
+    esac
+    WS_INSTALLED=0
+    if [[ -n "$WS_URL" ]]; then
+        if (curl -fsSL "$WS_URL" -o /tmp/ws.new || wget -q -O /tmp/ws.new "$WS_URL"); then
+            chmod +x /tmp/ws.new
+            if /tmp/ws.new --version 2>&1 | grep -q "ws-rs"; then
+                mv -f /tmp/ws.new /usr/bin/ws
+                WS_INSTALLED=1
+            fi
+        fi
+        rm -f /tmp/ws.new
+    fi
+    if [[ "$WS_INSTALLED" -eq 0 ]]; then
+        wget -O /usr/bin/ws "${REPO}limit/ws" >/dev/null 2>&1
+    fi
     wget -O /usr/bin/tun.conf "${REPO}limit/tun.conf" >/dev/null 2>&1
     wget -O /etc/systemd/system/ws.service "${REPO}limit/ws.service" >/dev/null 2>&1
     chmod +x /etc/systemd/system/ws.service

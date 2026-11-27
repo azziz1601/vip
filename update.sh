@@ -103,6 +103,34 @@ update_xray_lite_rust() {
         rm -f /tmp/xray-lite.new
     fi
 }
+migrate_ws_rs() {
+    # Sudah memakai ws-rs? Skip agar update cepat & idempotent
+    if [[ -x /usr/bin/ws ]] && /usr/bin/ws --version 2>&1 | grep -q "ws-rs"; then
+        return 0
+    fi
+
+    local arch ws_url
+    arch="$(uname -m)"
+    case "$arch" in
+        x86_64|amd64)  ws_url="https://github.com/${GITHUB_REPO}/releases/latest/download/ws-linux-amd64" ;;
+        aarch64|arm64) ws_url="https://github.com/${GITHUB_REPO}/releases/latest/download/ws-linux-arm64" ;;
+        *) return 0 ;;
+    esac
+
+    if (curl -fsSL "$ws_url" -o /tmp/ws.new || wget -q -O /tmp/ws.new "$ws_url"); then
+        chmod +x /tmp/ws.new
+        if /tmp/ws.new --version 2>&1 | grep -q "ws-rs"; then
+            systemctl stop ws >/dev/null 2>&1
+            mv -f /tmp/ws.new /usr/bin/ws
+            chmod +x /usr/bin/ws
+            systemctl restart ws >/dev/null 2>&1
+        else
+            rm -f /tmp/ws.new
+        fi
+    else
+        rm -f /tmp/ws.new
+    fi
+}
 sync_multi_transport_configs() {
     local domain
     domain=$(cat /etc/xray/domain 2>/dev/null || echo "localhost")
@@ -249,6 +277,9 @@ res1() {
     # Migrasi otomatis ke xray-lite-rs v1.0.0 (skip jika sudah terpasang)
     update_xray_lite_rust
 
+    # Migrasi otomatis /usr/bin/ws ke ws-rs dari GitHub Releases (skip jika sudah terpasang)
+    migrate_ws_rs
+
     # Sinkronisasi multi-transport (WS, gRPC, HTTPUpgrade, XHTTP) + migrasi akun lama
     sync_multi_transport_configs
 
@@ -260,7 +291,7 @@ echo -e "\033[1;36m━━━━━━━━━━━━━━━━━━━━�
 echo -e " \e[1;97;101m          UPDATE SCRIPT    \e[0m"
 echo -e "\033[1;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
 echo -e ""
-echo -e "  \033[1;91m update script, zevpn-limit, udpgw-rs & xray-lite\033[1;37m"
+echo -e "  \033[1;91m update script, zevpn-limit, udpgw-rs, ws-rs & xray-lite\033[1;37m"
 fun_bar 'res1'
 echo -e "\033[1;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
 echo -e ""
