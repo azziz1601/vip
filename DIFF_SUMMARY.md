@@ -1,8 +1,9 @@
-# Diff Summary — `vip` (Safe `limit-ip` + `CF-Connecting-IP` Real IP + `zevpn-limit` Fix)
+# Diff Summary — `vip` (Anti-Orphan `menu` Guard + Safe `limit-ip` + SlowDNS + `ws-rs`)
 
 | File | Perubahan |
 |---|---|
-| `limit/limit-ip` | Diubah ke mode **notify-only** (tidak lagi menghapus akun dari `config.json`/`.db`, tidak merestart Xray, dan tidak mengosongkan `access.log`), memperbaiki pencocokan eksak `email: <user>`, hitungan `0` saat kosong, serta cooldown alert Telegram 10 menit. |
-| `limit/nginx.conf` & `limit/xray.conf` | Menambah `map $http_cf_connecting_ip $client_real_ip` agar trafik Cloudflare mencatat IP asli user dari `CF-Connecting-IP` (bukan IP edge Cloudflare `104.x`/`172.x`) dan trafik direct tetap memakai `$remote_addr` dari PROXY protocol. |
-| `zevpn-limit/src/config.rs` | Menambah `.trim_start()` saat mendeteksi baris `},{` pada `remove_user_from_xray_config()`. |
-| `update.sh` | Otomatis memperbarui `/usr/bin/limit-ip` dan menyinkronkan `$client_real_ip` Nginx tanpa pernah menyentuh `/etc/xray/config.json`. |
+| `limit/menu.zip` (`menu/menu` & sub-menu `while true`) | Menambah `trap 'exit 0' HUP TERM PIPE`, guard `[[ -t 0 ]] \|\| exit 0`, dan `read ... \|\| exit 0` agar sesi menu otomatis berhenti saat SSH putus (mencegah proses `menu` orphan & lonjakan Load Average). |
+| `limit/limit-ip` | Mode **notify-only** (tanpa hapus akun/restart Xray/kosongkan log, pencocokan eksak `email: <user>`, cooldown alert 10 menit). |
+| `limit/nginx.conf` & `limit/xray.conf` | `map $http_cf_connecting_ip $client_real_ip` (IP asli Cloudflare + PROXY protocol direct) + tuning stabilitas (`worker_shutdown_timeout 10s`, `worker_connections 4096`, timeout `360s`). |
+| `update.sh` | Tidak menyentuh `/etc/xray/config.json`; sinkronisasi otomatis menu, `limit-ip`, `ws-rs`, `zevpn-limit`, `udpgw-rs`, `xray-lite-rs`, SlowDNS, Nginx/HAProxy, & cron log 6 jam. |
+| `setup.sh`, `ws-rs/`, `zevpn-limit/` | Instalasi tunggal `setup.sh`, integrasi SlowDNS HTTP Custom (UDP 53 + `NOTRACK` + NS/Pub Key di akun SSH), `ws-rs` static `musl`, dan `zevpn-limit` `reload` (`SIGHUP`) + `.trim_start()`. |
