@@ -19,14 +19,14 @@ type viewID int
 
 const (
 	viewDashboard viewID = iota
-	viewProtoMenu        // Native submenu for SSH / VMess / VLESS / Trojan
+	viewProtoMenu
 	viewSystem
 	viewServices
 	viewSlowDNS
 	viewRollbackConfirm
-	viewForm       // Native Go input form (Create / Renew)
-	viewPickUser   // Native Go user picker (Renew / Delete / Detail)
-	viewTextResult // Native Go copyable result viewer (Created config / Login table / Maintenance output)
+	viewForm
+	viewPickUser
+	viewTextResult
 )
 
 type pickAction int
@@ -75,63 +75,64 @@ type Model struct {
 	snap    sysinfo.Snapshot
 	notice  string
 
-	// Native form state
 	fMode      formMode
 	fTitle     string
 	fFields    []formField
 	fFocus     int
 	fTargetUsr string
 
-	// Native user picker state
 	pAction pickAction
 	pUsers  []sysinfo.Account
 
-	// Native result screen state
 	rTitle string
 	rBody  string
 	rBack  viewID
 }
 
 var (
-	colorCyan   = lipgloss.Color("#22D3EE")
-	colorBlue   = lipgloss.Color("#38BDF8")
-	colorGreen  = lipgloss.Color("#4ADE80")
-	colorRed    = lipgloss.Color("#F87171")
-	colorYellow = lipgloss.Color("#FACC15")
-	colorMuted  = lipgloss.Color("#94A3B8")
-	colorText   = lipgloss.Color("#F8FAFC")
+	colorBlueLine = lipgloss.Color("#2563EB")
+	colorRedLine  = lipgloss.Color("#991B1B")
+	colorRedBar   = lipgloss.Color("#EF4444")
+	colorGreen    = lipgloss.Color("#22C55E")
+	colorSky      = lipgloss.Color("#38BDF8")
+	colorAmber    = lipgloss.Color("#F59E0B")
+	colorRed      = lipgloss.Color("#F87171")
+	colorMuted    = lipgloss.Color("#94A3B8")
+	colorText     = lipgloss.Color("#E2E8F0")
 
-	// Classic-inspired fixed-width (62 chars) bordered boxes with modern rounded corners
-	boxWidth = 62
+	panelWidth = 52
 
-	bannerStyle = lipgloss.NewStyle().
+	// No vertical walls anywhere so links & text copy cleanly on mobile SSH clients!
+	barBannerStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#FFFFFF")).
-			Background(lipgloss.Color("#DC2626")).
-			Width(boxWidth - 4).
+			Foreground(colorGreen).
+			Background(colorRedBar).
+			Width(panelWidth).
 			Align(lipgloss.Center)
 
-	boxStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(colorCyan).
-			Width(boxWidth).
-			Padding(0, 1)
+	blueRuleStyle = lipgloss.NewStyle().Foreground(colorBlueLine)
+	redRuleStyle  = lipgloss.NewStyle().Foreground(colorRedLine)
 
-	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(colorCyan)
-	labelStyle = lipgloss.NewStyle().Foreground(colorCyan)
+	greenStyle = lipgloss.NewStyle().Foreground(colorGreen)
+	skyStyle   = lipgloss.NewStyle().Foreground(colorSky).Bold(true)
+	amberStyle = lipgloss.NewStyle().Foreground(colorAmber).Bold(true)
+	errStyle   = lipgloss.NewStyle().Foreground(colorRed).Bold(true)
 	mutedStyle = lipgloss.NewStyle().Foreground(colorMuted)
 	valStyle   = lipgloss.NewStyle().Foreground(colorText).Bold(true)
-	okStyle    = lipgloss.NewStyle().Foreground(colorGreen).Bold(true)
-	errStyle   = lipgloss.NewStyle().Foreground(colorRed).Bold(true)
-	warnStyle  = lipgloss.NewStyle().Foreground(colorYellow).Bold(true)
 
 	selRowStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color("#0F172A")).
-			Background(colorCyan)
-
-	numStyle = lipgloss.NewStyle().Bold(true).Foreground(colorGreen)
+			Background(colorGreen)
 )
+
+func blueLine() string {
+	return blueRuleStyle.Render(strings.Repeat("─", panelWidth))
+}
+
+func redLine() string {
+	return redRuleStyle.Render(strings.Repeat("─", panelWidth))
+}
 
 func NewModel(version string) Model {
 	return Model{
@@ -276,18 +277,11 @@ func runQuickTrial() func(m *Model) tea.Cmd {
 		var err error
 		if m.proto == accounts.ProtoSSH {
 			detail, err = accounts.CreateSSHAccount(accounts.SSHCreateParams{
-				Username: user,
-				Password: "1",
-				Days:     1,
-				IPLimit:  2,
+				Username: user, Password: "1", Days: 1, IPLimit: 2,
 			})
 		} else {
 			detail, err = accounts.CreateXrayAccount(accounts.XrayCreateParams{
-				Proto:    m.proto,
-				Username: user,
-				Days:     1,
-				QuotaGB:  1,
-				IPLimit:  2,
+				Proto: m.proto, Username: user, Days: 1, QuotaGB: 1, IPLimit: 2,
 			})
 		}
 		if err != nil {
@@ -308,7 +302,7 @@ func openPicker(act pickAction) func(m *Model) tea.Cmd {
 		m.snap = sysinfo.Collect()
 		accs := m.currentAccounts()
 		if len(accs) == 0 {
-			m.notice = warnStyle.Render("Belum ada akun " + strings.ToUpper(string(m.proto)))
+			m.notice = amberStyle.Render("Belum ada akun " + strings.ToUpper(string(m.proto)))
 			return nil
 		}
 		m.pAction = act
@@ -401,7 +395,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.notice = errStyle.Render("Error: " + msg.err.Error())
 		} else {
-			m.notice = okStyle.Render("Selesai")
+			m.notice = greenStyle.Render("Selesai")
 		}
 		return m, nil
 
@@ -410,7 +404,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.notice = errStyle.Render(fmt.Sprintf("Gagal %s %s: %v", msg.action, msg.service, msg.err))
 		} else {
-			m.notice = okStyle.Render(fmt.Sprintf("Berhasil %s %s", msg.action, msg.service))
+			m.notice = greenStyle.Render(fmt.Sprintf("Berhasil %s %s", msg.action, msg.service))
 		}
 		return m, nil
 
@@ -461,7 +455,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "r":
 			m.snap = sysinfo.Collect()
-			m.notice = okStyle.Render("Status diperbarui")
+			m.notice = greenStyle.Render("Status diperbarui")
 			return m, nil
 		case "up", "k":
 			if m.cursor > 0 {
@@ -593,7 +587,7 @@ func (m Model) submitForm() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.snap = sysinfo.Collect()
-		m.notice = okStyle.Render(fmt.Sprintf("Akun '%s' diperpanjang s/d %s", m.fTargetUsr, newExp))
+		m.notice = greenStyle.Render(fmt.Sprintf("Akun '%s' diperpanjang s/d %s", m.fTargetUsr, newExp))
 		m.view = viewProtoMenu
 		m.cursor = 0
 		return m, nil
@@ -667,7 +661,7 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if err != nil {
 				m.notice = errStyle.Render("Gagal hapus: " + err.Error())
 			} else {
-				m.notice = okStyle.Render(fmt.Sprintf("Akun '%s' berhasil dihapus", target))
+				m.notice = greenStyle.Render(fmt.Sprintf("Akun '%s' berhasil dihapus", target))
 			}
 			m.snap = sysinfo.Collect()
 			m.view = viewProtoMenu
@@ -681,40 +675,42 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) View() string {
 	var b strings.Builder
 
-	// Top classic-style centered banner
-	topBox := boxStyle.Render(bannerStyle.Render(fmt.Sprintf(".::. ZE-VPN STORE TUNNEL  v%s .::.", m.version)))
-	b.WriteString(topBox + "\n")
+	// Top banner: horizontal blue lines + red accent bar (NO vertical borders!)
+	b.WriteString(blueLine() + "\n")
+	b.WriteString(barBannerStyle.Render(fmt.Sprintf("ZE-VPN TUNNELING  •  v%s", m.version)) + "\n")
+	b.WriteString(blueLine() + "\n")
 
 	if m.view == viewDashboard {
-		b.WriteString(m.renderClassicDashboard())
+		b.WriteString(m.renderDashboard())
 		return b.String()
 	}
 
+	// Result viewer: ZERO vertical borders so long-press copy on mobile never captures box lines!
 	if m.view == viewTextResult {
-		body := titleStyle.Render(m.rTitle) + "\n\n" + m.rBody
-		b.WriteString(boxStyle.Width(boxWidth + 14).Render(body) + "\n")
-		b.WriteString(mutedStyle.Render("  Tekan Enter / Esc untuk kembali...") + "\n")
+		b.WriteString("\n" + amberStyle.Render(m.rTitle) + "\n")
+		b.WriteString(redLine() + "\n")
+		b.WriteString(m.rBody + "\n")
+		b.WriteString(blueLine() + "\n")
+		b.WriteString(mutedStyle.Render("Tekan Enter / Esc untuk kembali...") + "\n")
 		return b.String()
 	}
 
 	if m.view == viewForm {
-		var lines []string
-		lines = append(lines, titleStyle.Render(m.fTitle), "")
+		b.WriteString("\n" + greenStyle.Bold(true).Render("  "+m.fTitle) + "\n")
+		b.WriteString(redLine() + "\n")
 		for i, f := range m.fFields {
 			cursorMark := "  "
-			valDisplay := f.Value
+			valDisplay := valStyle.Render(f.Value)
 			if i == m.fFocus {
-				cursorMark = okStyle.Render("▸ ")
-				valDisplay = valStyle.Render(f.Value + "█")
-			} else {
-				valDisplay = valStyle.Render(f.Value)
+				cursorMark = amberStyle.Render("▸ ")
+				valDisplay = skyStyle.Render(f.Value + "█")
 			}
-			lines = append(lines, fmt.Sprintf("%s%s : %s", cursorMark, labelStyle.Render(f.Label), valDisplay))
+			b.WriteString(fmt.Sprintf("%s%s : %s\n", cursorMark, greenStyle.Render(f.Label), valDisplay))
 		}
 		if m.notice != "" {
-			lines = append(lines, "", m.notice)
+			b.WriteString("\n  " + m.notice + "\n")
 		}
-		b.WriteString(boxStyle.Render(strings.Join(lines, "\n")) + "\n")
+		b.WriteString(blueLine() + "\n")
 		b.WriteString(mutedStyle.Render("  Tab/↓ Lanjut • Enter Simpan • Esc Batal") + "\n")
 		return b.String()
 	}
@@ -729,41 +725,40 @@ func (m Model) View() string {
 		case pickDelete:
 			actLabel = "HAPUS AKUN — " + strings.ToUpper(string(m.proto))
 		}
-		var lines []string
-		lines = append(lines, titleStyle.Render(actLabel), "")
+		b.WriteString("\n" + greenStyle.Bold(true).Render("  "+actLabel) + "\n")
+		b.WriteString(redLine() + "\n")
 		for i, a := range m.pUsers {
-			row := fmt.Sprintf(" %2d) %-20s  exp: %s", i+1, a.Username, a.Expired)
+			row := fmt.Sprintf(" %2d) %-18s  exp: %s", i+1, a.Username, a.Expired)
 			if i == m.cursor {
-				lines = append(lines, selRowStyle.Width(boxWidth-4).Render("▸"+row))
+				b.WriteString(selRowStyle.Width(panelWidth).Render("▸"+row) + "\n")
 			} else {
-				lines = append(lines, " "+row)
+				b.WriteString(greenStyle.Render(" "+row) + "\n")
 			}
 		}
-		b.WriteString(boxStyle.Render(strings.Join(lines, "\n")) + "\n")
+		b.WriteString(blueLine() + "\n")
 		b.WriteString(mutedStyle.Render("  ↑/↓ Pilih • Enter Lanjut • Esc Kembali") + "\n")
 		return b.String()
 	}
 
-	// Sub-menus (Proto / System / Services / SlowDNS / Rollback)
+	// Sub-menus (zero vertical walls)
 	if m.view == viewSlowDNS {
-		info := strings.Join([]string{
-			titleStyle.Render("KONFIGURASI SLOWDNS (HTTP CUSTOM)"),
-			fmt.Sprintf(" %s = %s", labelStyle.Render("Domain      "), valStyle.Render(m.snap.Domain)),
-			fmt.Sprintf(" %s = %s", labelStyle.Render("Name Server "), valStyle.Render(m.snap.SlowDNSNS)),
-			fmt.Sprintf(" %s = %s", labelStyle.Render("Pub Key     "), okStyle.Render(m.snap.SlowDNSPub)),
-			fmt.Sprintf(" %s = %s", labelStyle.Render("Port UDP    "), valStyle.Render("53")),
-		}, "\n")
-		b.WriteString(boxStyle.Render(info) + "\n")
+		b.WriteString("\n" + greenStyle.Bold(true).Render("  KONFIGURASI SLOWDNS (HTTP CUSTOM)") + "\n")
+		b.WriteString(redLine() + "\n")
+		b.WriteString(fmt.Sprintf("  %s : %s\n", greenStyle.Render("DOMAIN     "), skyStyle.Render(m.snap.Domain)))
+		b.WriteString(fmt.Sprintf("  %s : %s\n", greenStyle.Render("NAME SERVER"), skyStyle.Render(m.snap.SlowDNSNS)))
+		b.WriteString(fmt.Sprintf("  %s : %s\n", greenStyle.Render("PUB KEY    "), amberStyle.Render(m.snap.SlowDNSPub)))
+		b.WriteString(fmt.Sprintf("  %s : %s\n", greenStyle.Render("PORT UDP   "), greenStyle.Render("53")))
+		b.WriteString(blueLine() + "\n")
 	} else if m.view == viewRollbackConfirm {
-		info := strings.Join([]string{
-			warnStyle.Render("KONFIRMASI ROLLBACK KE MENU KLASIK"),
-			"Perintah 'menu' akan dikembalikan ke /usr/local/sbin/menu-legacy.",
-			"Untuk balik ke TUI Go kapan saja, ketik: menu-tui",
-		}, "\n")
-		b.WriteString(boxStyle.Render(info) + "\n")
+		b.WriteString("\n" + amberStyle.Render("  KONFIRMASI ROLLBACK KE MENU KLASIK") + "\n")
+		b.WriteString(redLine() + "\n")
+		b.WriteString("  Perintah 'menu' akan dikembalikan ke menu-legacy.\n")
+		b.WriteString("  Untuk balik ke TUI Go kapan saja, ketik: menu-tui\n")
+		b.WriteString(blueLine() + "\n")
 	} else if m.view == viewProtoMenu {
 		pTitle := strings.ToUpper(string(m.proto))
-		b.WriteString(boxStyle.Render(fmt.Sprintf("%s  (%d akun aktif)", titleStyle.Render("MENU "+pTitle), len(m.currentAccounts()))) + "\n")
+		b.WriteString(fmt.Sprintf("\n  %s  (%s akun)\n", greenStyle.Bold(true).Render("MENU "+pTitle), amberStyle.Render(fmt.Sprintf("%d", len(m.currentAccounts())))))
+		b.WriteString(redLine() + "\n")
 	}
 
 	if m.notice != "" {
@@ -771,95 +766,98 @@ func (m Model) View() string {
 	}
 
 	items := m.itemsForCurrentView()
-	var listLines []string
 	for i, it := range items {
 		if i == m.cursor {
-			listLines = append(listLines, selRowStyle.Width(boxWidth-4).Render(fmt.Sprintf(" ▸ [%s] %s", it.Key, it.Label)))
+			b.WriteString(selRowStyle.Width(panelWidth).Render(fmt.Sprintf(" ▸ [%s] %s", it.Key, it.Label)) + "\n")
 		} else {
-			listLines = append(listLines, fmt.Sprintf("   [%s] %s", numStyle.Render(it.Key), it.Label))
+			b.WriteString(fmt.Sprintf("   [%s] %s\n", amberStyle.Render(it.Key), greenStyle.Render(it.Label)))
 		}
 	}
-	b.WriteString(boxStyle.Render(strings.Join(listLines, "\n")) + "\n")
-	b.WriteString(mutedStyle.Render("  ↑/↓ Navigasi • Enter Pilih • Angka Pintasan • Esc/0 Kembali") + "\n")
+	b.WriteString(blueLine() + "\n")
+	b.WriteString(mutedStyle.Render("  ↑/↓ Navigasi • Enter Pilih • Esc/0 Kembali") + "\n")
 	return b.String()
 }
 
-func (m Model) renderClassicDashboard() string {
+func (m Model) renderDashboard() string {
 	var b strings.Builder
 
-	// 1. System Info Box (mirrors classic menu/menu lines 209-223)
-	sysLines := []string{
-		fmt.Sprintf(" %s %-14s = %s", errStyle.Render("•"), labelStyle.Render("System OS"), m.snap.OSName),
-		fmt.Sprintf(" %s %-14s = %d Core  (Load: %s)", errStyle.Render("•"), labelStyle.Render("Core System"), m.snap.CPUCores, m.snap.LoadAvg),
-		fmt.Sprintf(" %s %-14s = %d/%d MB (%d%%)", errStyle.Render("•"), labelStyle.Render("Server RAM"), m.snap.MemUsedMB, m.snap.MemTotalMB, m.snap.MemPercent),
-		fmt.Sprintf(" %s %-14s = %s", errStyle.Render("•"), labelStyle.Render("Uptime Server"), m.snap.Uptime),
-		fmt.Sprintf(" %s %-14s = %s", errStyle.Render("•"), labelStyle.Render("Domain"), valStyle.Render(m.snap.Domain)),
-		fmt.Sprintf(" %s %-14s = %s", errStyle.Render("•"), labelStyle.Render("IP VPS"), valStyle.Render(m.snap.IP)),
-		fmt.Sprintf(" %s %-14s = %s (%s)", errStyle.Render("•"), labelStyle.Render("ISP / City"), m.snap.ISP, m.snap.City),
-	}
-	b.WriteString(boxStyle.Render(strings.Join(sysLines, "\n")) + "\n")
+	// 1. System Info + Monthly/Daily Bandwidth (clean borderless right/left walls, red dividers)
+	b.WriteString(fmt.Sprintf("  %s : %s\n", greenStyle.Render("OS     "), greenStyle.Render(m.snap.OSName)))
+	b.WriteString(fmt.Sprintf("  %s : %s\n", greenStyle.Render("RAM    "), greenStyle.Render(fmt.Sprintf("%dM / %dM (%d%%)", m.snap.MemUsedMB, m.snap.MemTotalMB, m.snap.MemPercent))))
+	b.WriteString(fmt.Sprintf("  %s : %s\n", greenStyle.Render("SWAP   "), greenStyle.Render(fmt.Sprintf("%dM", m.snap.SwapTotalMB))))
+	b.WriteString(fmt.Sprintf("  %s : %s\n", greenStyle.Render("CITY   "), greenStyle.Render(m.snap.City)))
+	b.WriteString(fmt.Sprintf("  %s : %s\n", greenStyle.Render("ISP    "), greenStyle.Render(m.snap.ISP)))
+	b.WriteString(fmt.Sprintf("  %s : %s\n", greenStyle.Render("IP     "), skyStyle.Render(m.snap.IP)))
+	b.WriteString(fmt.Sprintf("  %s : %s\n", greenStyle.Render("DOMAIN "), skyStyle.Render(m.snap.Domain)))
+	b.WriteString(fmt.Sprintf("  %s : %s\n", greenStyle.Render("UPTIME "), greenStyle.Render(m.snap.Uptime)))
+	b.WriteString(redLine() + "\n")
+	b.WriteString(fmt.Sprintf("  %s : %-13s %s\n", greenStyle.Render("MONTH  "), greenStyle.Render(m.snap.BW.MonthTotal), greenStyle.Render("["+m.snap.BW.MonthName+"]")))
+	b.WriteString(fmt.Sprintf("  %s : %s\n", greenStyle.Render("RX     "), greenStyle.Render(m.snap.BW.MonthRX)))
+	b.WriteString(fmt.Sprintf("  %s : %s\n", greenStyle.Render("TX     "), greenStyle.Render(m.snap.BW.MonthTX)))
+	b.WriteString(redLine() + "\n")
+	b.WriteString(fmt.Sprintf("  %s : %-13s %s\n", greenStyle.Render("DAY    "), greenStyle.Render(m.snap.BW.DayTotal), greenStyle.Render("["+m.snap.BW.DayName+"]")))
+	b.WriteString(fmt.Sprintf("  %s : %s\n", greenStyle.Render("RX     "), greenStyle.Render(m.snap.BW.DayRX)))
+	b.WriteString(fmt.Sprintf("  %s : %s\n", greenStyle.Render("TX     "), greenStyle.Render(m.snap.BW.DayTX)))
+	b.WriteString(fmt.Sprintf("  %s : %s\n", greenStyle.Render("TRAFFIC"), greenStyle.Render(m.snap.BW.TrafficRate)))
+	b.WriteString(blueLine() + "\n")
 
-	// 2. Account Summary Box (mirrors classic lines 224-229)
-	accLines := []string{
-		fmt.Sprintf("   %-16s %s %s ACCOUNT", labelStyle.Render("SSH/OPENVPN"), warnStyle.Render("➤"), valStyle.Render(fmt.Sprintf("%-3d", len(m.snap.SSHAccounts)))),
-		fmt.Sprintf("   %-16s %s %s ACCOUNT", labelStyle.Render("VMESS/MULTI"), warnStyle.Render("➤"), valStyle.Render(fmt.Sprintf("%-3d", len(m.snap.VMessAccs)))),
-		fmt.Sprintf("   %-16s %s %s ACCOUNT", labelStyle.Render("VLESS/MULTI"), warnStyle.Render("➤"), valStyle.Render(fmt.Sprintf("%-3d", len(m.snap.VLESSAccs)))),
-		fmt.Sprintf("   %-16s %s %s ACCOUNT", labelStyle.Render("TROJAN/MULTI"), warnStyle.Render("➤"), valStyle.Render(fmt.Sprintf("%-3d", len(m.snap.TrojanAccs)))),
-	}
-	b.WriteString(boxStyle.Render(strings.Join(accLines, "\n")) + "\n")
-
-	// 3. Service Status Grid (2 rows x 4 services, compact like classic lines 231-234)
-	var svcRows []string
-	for r := 0; r < len(m.snap.Services); r += 4 {
-		var cols []string
-		for c := r; c < r+4 && c < len(m.snap.Services); c++ {
-			s := m.snap.Services[c]
-			dot := errStyle.Render("●")
-			if s.Active {
-				dot = okStyle.Render("●")
+	// 2. Compact Service Status Row (XRAY : ON | SSH-WS : ON | LOADBLC : ON | SLOWDNS : ON)
+	svcBadge := func(name string) string {
+		for _, s := range m.snap.Services {
+			if s.Name == name {
+				if s.Active {
+					return amberStyle.Render("ON")
+				}
+				return errStyle.Render("OFF")
 			}
-			cols = append(cols, fmt.Sprintf("%s %-10s", dot, s.Label))
 		}
-		svcRows = append(svcRows, " "+strings.Join(cols, " "))
+		return errStyle.Render("OFF")
 	}
-	b.WriteString(boxStyle.Render(strings.Join(svcRows, "\n")) + "\n")
+	b.WriteString(fmt.Sprintf("  %s: %s  %s: %s  %s: %s  %s: %s\n",
+		greenStyle.Render("XRAY"), svcBadge("xray"),
+		greenStyle.Render("SSH-WS"), svcBadge("ws"),
+		greenStyle.Render("LOADBLC"), svcBadge("haproxy"),
+		greenStyle.Render("DNS"), svcBadge("slowdns"),
+	))
+	b.WriteString(blueLine() + "\n")
+
+	// 3. LIST ACCOUNTS section (matching screenshot style)
+	b.WriteString(lipgloss.NewStyle().Width(panelWidth).Align(lipgloss.Center).Foreground(colorGreen).Render("LIST ACCOUNTS") + "\n")
+	b.WriteString(redLine() + "\n")
+	b.WriteString(fmt.Sprintf("    %s : %-4s %s\n", greenStyle.Render("SSH/OPENVPN"), amberStyle.Render(fmt.Sprintf("%d", len(m.snap.SSHAccounts))), greenStyle.Render("ACCOUNT")))
+	b.WriteString(fmt.Sprintf("    %s : %-4s %s\n", greenStyle.Render("VMESS      "), amberStyle.Render(fmt.Sprintf("%d", len(m.snap.VMessAccs))), greenStyle.Render("ACCOUNT")))
+	b.WriteString(fmt.Sprintf("    %s : %-4s %s\n", greenStyle.Render("VLESS      "), amberStyle.Render(fmt.Sprintf("%d", len(m.snap.VLESSAccs))), greenStyle.Render("ACCOUNT")))
+	b.WriteString(fmt.Sprintf("    %s : %-4s %s\n", greenStyle.Render("TROJAN     "), amberStyle.Render(fmt.Sprintf("%d", len(m.snap.TrojanAccs))), greenStyle.Render("ACCOUNT")))
+	b.WriteString(blueLine() + "\n")
 
 	if m.notice != "" {
 		b.WriteString("  " + m.notice + "\n")
 	}
 
-	// 4. Classic 2-Column Menu Grid (mirrors classic lines 235-241)
+	// 4. Clean 2-Column Menu (NO vertical divider lines!)
 	items := m.itemsForCurrentView()
 	half := (len(items) + 1) / 2
-	var gridLines []string
 	for i := 0; i < half; i++ {
-		leftCell := renderGridCell(items[i], i == m.cursor, 27)
-		rightCell := strings.Repeat(" ", 27)
+		left := renderMenuCell(items[i], i == m.cursor, 25)
+		right := ""
 		if i+half < len(items) {
-			rightCell = renderGridCell(items[i+half], i+half == m.cursor, 27)
+			right = renderMenuCell(items[i+half], i+half == m.cursor, 25)
 		}
-		gridLines = append(gridLines, leftCell+" │ "+rightCell)
+		b.WriteString(" " + left + " " + right + "\n")
 	}
-	b.WriteString(boxStyle.Render(strings.Join(gridLines, "\n")) + "\n")
-
-	// 5. Bandwidth Box (mirrors classic lines 242-245)
-	bwLine := fmt.Sprintf("  %s  Daily: %s   │   Monthly: %s",
-		titleStyle.Render("Bandwidth"), valStyle.Render(m.snap.BW.Daily), valStyle.Render(m.snap.BW.Monthly))
-	b.WriteString(boxStyle.Render(bwLine) + "\n")
-
-	b.WriteString(mutedStyle.Render("  ↑/↓ Navigasi • Enter Pilih • 0-9 Pintasan • r Refresh • q Keluar") + "\n")
+	b.WriteString(blueLine() + "\n")
+	b.WriteString(mutedStyle.Render("  ↑/↓ Pilih • Enter Buka • 0-9 Pintasan • r Refresh • q") + "\n")
 	return b.String()
 }
 
-func renderGridCell(it menuItem, selected bool, width int) string {
+func renderMenuCell(it menuItem, selected bool, width int) string {
 	if selected {
-		text := fmt.Sprintf("▸[%s] %s", it.Key, it.Label)
-		return selRowStyle.Width(width).Render(text)
+		return selRowStyle.Width(width).Render(fmt.Sprintf("▸[%s] %s", it.Key, it.Label))
 	}
 	plain := fmt.Sprintf(" [%s] %s", it.Key, it.Label)
 	pad := width - len(plain)
 	if pad < 0 {
 		pad = 0
 	}
-	return fmt.Sprintf(" [%s] %s%s", numStyle.Render(it.Key), it.Label, strings.Repeat(" ", pad))
+	return fmt.Sprintf(" [%s] %s%s", amberStyle.Render(it.Key), greenStyle.Render(it.Label), strings.Repeat(" ", pad))
 }

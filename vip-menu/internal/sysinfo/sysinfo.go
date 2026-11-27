@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type ServiceStatus struct {
@@ -23,9 +24,15 @@ type Account struct {
 }
 
 type Bandwidth struct {
-	Daily   string
-	Yday    string
-	Monthly string
+	MonthName   string
+	MonthTotal  string
+	MonthRX     string
+	MonthTX     string
+	DayName     string
+	DayTotal    string
+	DayRX       string
+	DayTX       string
+	TrafficRate string
 }
 
 type Snapshot struct {
@@ -40,6 +47,7 @@ type Snapshot struct {
 	MemUsedMB   uint64
 	MemTotalMB  uint64
 	MemPercent  int
+	SwapTotalMB uint64
 	SlowDNSNS   string
 	SlowDNSPub  string
 	BW          Bandwidth
@@ -65,17 +73,17 @@ func Collect() Snapshot {
 		BW:         readBandwidth(),
 	}
 
-	s.MemUsedMB, s.MemTotalMB, s.MemPercent = readMemInfo("/proc/meminfo")
+	s.MemUsedMB, s.MemTotalMB, s.MemPercent, s.SwapTotalMB = readMemInfo("/proc/meminfo")
 
 	svcDefs := []struct{ name, label string }{
-		{"ssh", "SSH"},
-		{"nginx", "NGINX"},
 		{"xray", "XRAY"},
-		{"ws", "WS-RS"},
+		{"ws", "SSH-WS"},
+		{"haproxy", "LOADBLC"},
+		{"nginx", "NGINX"},
 		{"dropbear", "DROPBEAR"},
-		{"haproxy", "HAPROXY"},
 		{"slowdns", "SLOWDNS"},
 		{"zevpn-limit", "QUOTA"},
+		{"ssh", "SSH"},
 	}
 	s.Services = make([]ServiceStatus, 0, len(svcDefs))
 	for _, d := range svcDefs {
@@ -92,19 +100,45 @@ func Collect() Snapshot {
 }
 
 func readBandwidth() Bandwidth {
-	bw := Bandwidth{Daily: "-", Yday: "-", Monthly: "-"}
+	now := time.Now()
+	bw := Bandwidth{
+		MonthName:   now.Month().String(),
+		MonthTotal:  "-",
+		MonthRX:     "-",
+		MonthTX:     "-",
+		DayName:     now.Weekday().String(),
+		DayTotal:    "-",
+		DayRX:       "-",
+		DayTX:       "-",
+		TrafficRate: "-",
+	}
 	out, err := exec.Command("vnstat", "--oneline").Output()
 	if err != nil {
 		return bw
 	}
-	// Format: 1;iface;date;rx_day;tx_day;total_day;avg;month;rx_mon;tx_mon;total_mon;...
+	// Format: 1;iface;date;rx_day;tx_day;total_day;avg_day;month;rx_mon;tx_mon;total_mon;avg_mon;...
 	parts := strings.Split(strings.TrimSpace(string(out)), ";")
 	if len(parts) >= 11 {
+		if v := strings.TrimSpace(parts[3]); v != "" {
+			bw.DayRX = v
+		}
+		if v := strings.TrimSpace(parts[4]); v != "" {
+			bw.DayTX = v
+		}
 		if v := strings.TrimSpace(parts[5]); v != "" {
-			bw.Daily = v
+			bw.DayTotal = v
+		}
+		if v := strings.TrimSpace(parts[6]); v != "" {
+			bw.TrafficRate = v
+		}
+		if v := strings.TrimSpace(parts[8]); v != "" {
+			bw.MonthRX = v
+		}
+		if v := strings.TrimSpace(parts[9]); v != "" {
+			bw.MonthTX = v
 		}
 		if v := strings.TrimSpace(parts[10]); v != "" {
-			bw.Monthly = v
+			bw.MonthTotal = v
 		}
 	}
 	return bw
@@ -166,12 +200,12 @@ func readUptime(path string) string {
 	hours := (total % 86400) / 3600
 	mins := (total % 3600) / 60
 	if days > 0 {
-		return fmt.Sprintf("%dd %dh %dm", days, hours, mins)
+		return fmt.Sprintf("%d days, %d hours, %d mins", days, hours, mins)
 	}
 	if hours > 0 {
-		return fmt.Sprintf("%dh %dm", hours, mins)
+		return fmt.Sprintf("%d hours, %d minutes", hours, mins)
 	}
-	return fmt.Sprintf("%dm", mins)
+	return fmt.Sprintf("%d minutes", mins)
 }
 
 func readLoadAvg(path string) string {
@@ -186,14 +220,14 @@ func readLoadAvg(path string) string {
 	return fmt.Sprintf("%s %s %s", fields[0], fields[1], fields[2])
 }
 
-func readMemInfo(path string) (usedMB, totalMB uint64, pct int) {
+func readMemInfo(path string) (usedMB, totalMB uint64, pct int, swapMB uint64) {
 	f, err := os.Open(path)
 	if err != nil {
-		return 0, 0, 0
+		return 0, 0, 0, 0
 	}
 	defer f.Close()
 
-	var totalKB, availKB uint64
+	var totalKB, availKB, swapKB uint64
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		fields := strings.Fields(sc.Text())
@@ -209,10 +243,13 @@ func readMemInfo(path string) (usedMB, totalMB uint64, pct int) {
 			totalKB = val
 		case "MemAvailable:":
 			availKB = val
+		case "SwapTotal:":
+			swapKB = val
 		}
 	}
+	swapMB = swapKB / 1024
 	if totalKB == 0 {
-		return 0, 0, 0
+		return 0, 0, 0, swapMB
 	}
 	usedKB := totalKB
 	if availKB <= totalKB {
@@ -221,7 +258,7 @@ func readMemInfo(path string) (usedMB, totalMB uint64, pct int) {
 	usedMB = usedKB / 1024
 	totalMB = totalKB / 1024
 	pct = int((usedKB * 100) / totalKB)
-	return usedMB, totalMB, pct
+	return usedMB, totalMB, pct, swapMB
 }
 
 func isServiceActive(name string) bool {
