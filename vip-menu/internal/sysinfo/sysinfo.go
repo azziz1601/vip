@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -21,24 +22,32 @@ type Account struct {
 	Protocol string
 }
 
+type Bandwidth struct {
+	Daily   string
+	Yday    string
+	Monthly string
+}
+
 type Snapshot struct {
-	Domain       string
-	IP           string
-	ISP          string
-	City         string
-	OSName       string
-	Uptime       string
-	LoadAvg      string
-	MemUsedMB    uint64
-	MemTotalMB   uint64
-	MemPercent   int
-	SlowDNSNS    string
-	SlowDNSPub   string
-	Services     []ServiceStatus
-	SSHAccounts  []Account
-	VMessAccs    []Account
-	VLESSAccs    []Account
-	TrojanAccs   []Account
+	Domain      string
+	IP          string
+	ISP         string
+	City        string
+	OSName      string
+	CPUCores    int
+	Uptime      string
+	LoadAvg     string
+	MemUsedMB   uint64
+	MemTotalMB  uint64
+	MemPercent  int
+	SlowDNSNS   string
+	SlowDNSPub  string
+	BW          Bandwidth
+	Services    []ServiceStatus
+	SSHAccounts []Account
+	VMessAccs   []Account
+	VLESSAccs   []Account
+	TrojanAccs  []Account
 }
 
 func Collect() Snapshot {
@@ -48,23 +57,25 @@ func Collect() Snapshot {
 		ISP:        readTrimmed("/root/.isp", "-"),
 		City:       readTrimmed("/root/.city", "-"),
 		OSName:     readOSName("/etc/os-release"),
+		CPUCores:   runtime.NumCPU(),
 		Uptime:     readUptime("/proc/uptime"),
 		LoadAvg:    readLoadAvg("/proc/loadavg"),
 		SlowDNSNS:  readTrimmed("/etc/xray/dns", "Belum diset"),
 		SlowDNSPub: readFirstNonEmpty([]string{"/etc/slowdns/server.pub", "/root/slowdns/server.pub"}, "Belum diset"),
+		BW:         readBandwidth(),
 	}
 
 	s.MemUsedMB, s.MemTotalMB, s.MemPercent = readMemInfo("/proc/meminfo")
 
 	svcDefs := []struct{ name, label string }{
-		{"xray", "Xray"},
-		{"nginx", "Nginx"},
-		{"haproxy", "HAProxy"},
-		{"ws", "WS-Proxy"},
-		{"dropbear", "Dropbear"},
-		{"slowdns", "SlowDNS"},
-		{"zevpn-limit", "Quota"},
-		{"udp-mini-1", "UDPGW"},
+		{"ssh", "SSH"},
+		{"nginx", "NGINX"},
+		{"xray", "XRAY"},
+		{"ws", "WS-RS"},
+		{"dropbear", "DROPBEAR"},
+		{"haproxy", "HAPROXY"},
+		{"slowdns", "SLOWDNS"},
+		{"zevpn-limit", "QUOTA"},
 	}
 	s.Services = make([]ServiceStatus, 0, len(svcDefs))
 	for _, d := range svcDefs {
@@ -78,6 +89,25 @@ func Collect() Snapshot {
 	s.SSHAccounts = ParseSSHAccounts("/etc/ssh/.ssh.db")
 	s.VMessAccs, s.VLESSAccs, s.TrojanAccs = ParseXrayAccounts("/etc/xray/config.json")
 	return s
+}
+
+func readBandwidth() Bandwidth {
+	bw := Bandwidth{Daily: "-", Yday: "-", Monthly: "-"}
+	out, err := exec.Command("vnstat", "--oneline").Output()
+	if err != nil {
+		return bw
+	}
+	// Format: 1;iface;date;rx_day;tx_day;total_day;avg;month;rx_mon;tx_mon;total_mon;...
+	parts := strings.Split(strings.TrimSpace(string(out)), ";")
+	if len(parts) >= 11 {
+		if v := strings.TrimSpace(parts[5]); v != "" {
+			bw.Daily = v
+		}
+		if v := strings.TrimSpace(parts[10]); v != "" {
+			bw.Monthly = v
+		}
+	}
+	return bw
 }
 
 func readTrimmed(path, fallback string) string {
@@ -195,8 +225,13 @@ func readMemInfo(path string) (usedMB, totalMB uint64, pct int) {
 }
 
 func isServiceActive(name string) bool {
-	err := exec.Command("systemctl", "is-active", "--quiet", name).Run()
-	return err == nil
+	if err := exec.Command("systemctl", "is-active", "--quiet", name).Run(); err == nil {
+		return true
+	}
+	if name == "ssh" {
+		return exec.Command("systemctl", "is-active", "--quiet", "sshd").Run() == nil
+	}
+	return false
 }
 
 // ParseSSHAccounts reads deduplicated SSH accounts from `/etc/ssh/.ssh.db`.

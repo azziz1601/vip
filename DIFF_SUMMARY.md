@@ -1,7 +1,8 @@
-# Diff Summary — `vip` (Go TUI `vip-menu` + Instant Rollback)
+# Diff Summary — `vip` (Go TUI `vip-menu v1.1.0` Menyeluruh + Layout Klasik)
 
 | File | Perubahan |
 |---|---|
-| `vip-menu/` | Panel TUI modern berbasis **Go (`Bubble Tea` + `Lip Gloss`)** sebagai 1 binary static tunggal (`vip-menu`): dashboard live (Domain, IP, OS, Uptime, Load, RAM, status 8 service, jumlah akun SSH/VMess/VLESS/Trojan), navigasi panah + pintasan `1–9`, Service Control (`reload` SIGHUP Xray, Nginx, HAProxy, WS, SlowDNS), info SlowDNS, anti-orphan TTY/SIGHUP guard, dan proteksi anti-nested menu (`VIP_MENU_NESTED=1`). |
-| `.github/workflows/build-menu.yml` | Workflow GitHub Actions (`go mod tidy`, `go vet`, `go test`, build static `CGO_ENABLED=0` `amd64` & `arm64`, + GitHub Release otomatis saat push tag `v*`). |
-| `setup.sh` & `update.sh` | Menyimpan menu Bash klasik di `/usr/local/sbin/menu-legacy`, memasang `/usr/local/bin/vip-menu`, membuat perintah `menu-rollback` & `menu-tui`, serta menghormati opt-out `/etc/xray/.use-legacy-menu` agar rollback tidak pernah tertimpa saat update. |
+| `vip-menu/internal/accounts/accounts.go` | **Baru** — Implementasi 100% native Go CRUD untuk **SSH (+ SlowDNS NS & Pub Key)**, **VMess**, **VLESS**, dan **Trojan** (Buat, Trial 1-klik, Perpanjang, Hapus, Cek Login eksak, Lihat Detail/Link, Hapus Expired `xp`, Clear Cache & Log, validasi `xray -t` + atomic write + `systemctl reload xray` `SIGHUP` + notifikasi Telegram) + unit test di `accounts_test.go`. |
+| `vip-menu/internal/tui/model.go` | Merombak tampilan agar mengikuti struktur **menu klasik** (banner merah `.::. ZE-VPN STORE TUNNEL .::.`, kotak System OS/Core/RAM/Uptime/Domain/IP/ISP, kotak jumlah akun, grid status 8 service, grid menu 2 kolom `[1]-[0]`, dan kotak Bandwidth `vnstat`), lengkap dengan form input native Go, pemilih akun native, dan tampilan hasil yang bisa langsung disalin. |
+| `vip-menu/internal/sysinfo/sysinfo.go` | Menambah jumlah CPU core (`runtime.NumCPU()`) dan ringkasan bandwidth harian/bulanan dari `vnstat --oneline`. |
+| Rollback | Tetap 100% aman: menu Bash klasik tersimpan di `/usr/local/sbin/menu-legacy`, rollback instan lewat opsi `[0]` di dashboard atau `menu-rollback` (`menu-tui` untuk kembali ke Go TUI). |
