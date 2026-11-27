@@ -309,7 +309,7 @@ sync_multi_transport_configs() {
     fi
 
     # 2e. Sinkronkan ws_ssh_backend di HAProxy (dukungan payload BMOVE/CONNECT langsung ke ws-rs)
-    if [[ -f /etc/haproxy/haproxy.cfg ]] && ! grep -q "ws_ssh_backend" /etc/haproxy/haproxy.cfg; then
+    if [[ -f /etc/haproxy/haproxy.cfg ]] && ! grep -q "sshssl_backend" /etc/haproxy/haproxy.cfg; then
         cp -f /etc/haproxy/haproxy.cfg /etc/haproxy/haproxy.cfg.bak.ssh
         if curl -fsSL -H "Cache-Control: no-cache" "${RAW_REPO}limit/haproxy.cfg?t=$(date +%s)" -o /tmp/haproxy.cfg.ssh; then
             mv -f /tmp/haproxy.cfg.ssh /etc/haproxy/haproxy.cfg
