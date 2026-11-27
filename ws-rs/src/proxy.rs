@@ -191,10 +191,37 @@ async fn handle_client(
             eprintln!("[ws-rs] {src} upgraded -> {target_addr}");
         }
 
-        // Forward any early-data bytes sent right after \r\n\r\n.
-        let leftover = &buf[(header_end + 4)..];
+        // Handle [split] double-header payloads (e.g. BMOVE/CONNECT followed by GET Upgrade)
+        // as well as early-data bytes sent immediately after \r\n\r\n.
+        let mut leftover = buf[(header_end + 4)..].to_vec();
+        if !parsed.has_upgrade {
+            if leftover.is_empty() {
+                if let Ok(Ok(n)) = timeout(Duration::from_millis(120), client.read(&mut tmp)).await {
+                    if n > 0 {
+                        leftover.extend_from_slice(&tmp[..n]);
+                    }
+                }
+            }
+            if looks_like_http(&leftover) {
+                while find_header_end(&leftover).is_none() && leftover.len() <= MAX_HTTP_HEADER_BYTES {
+                    match timeout(HANDSHAKE_TIMEOUT, client.read(&mut tmp)).await {
+                        Ok(Ok(0)) | Err(_) => break,
+                        Ok(Ok(n)) => leftover.extend_from_slice(&tmp[..n]),
+                        Ok(Err(e)) => return Err(e),
+                    }
+                }
+                if let Some(pos2) = find_header_end(&leftover) {
+                    let parsed2 = parse_http_headers(&leftover[..pos2]);
+                    if parsed2.ws_key.is_some() {
+                        let resp2 = build_101_response(parsed2.ws_key.as_deref());
+                        client.write_all(&resp2).await?;
+                    }
+                    leftover = leftover[(pos2 + 4)..].to_vec();
+                }
+            }
+        }
         if !leftover.is_empty() {
-            target.write_all(leftover).await?;
+            target.write_all(&leftover).await?;
         }
     } else {
         if verbose >= 1 {

@@ -105,7 +105,7 @@ update_xray_lite_rust() {
 }
 migrate_ws_rs() {
     # Sudah memakai ws-rs? Skip agar update cepat & idempotent
-    if [[ -x /usr/bin/ws ]] && /usr/bin/ws --version 2>&1 | grep -q "ws-rs"; then
+    if [[ -x /usr/bin/ws ]] && /usr/bin/ws --version 2>&1 | grep -q "ws-rs v1.1.0"; then
         return 0
     fi
 
@@ -308,12 +308,33 @@ sync_multi_transport_configs() {
         rm -f /tmp/nginx.conf.cf /tmp/xray.conf.cf
     fi
 
+    # 2e. Sinkronkan ws_ssh_backend di HAProxy (dukungan payload BMOVE/CONNECT langsung ke ws-rs)
+    if [[ -f /etc/haproxy/haproxy.cfg ]] && ! grep -q "ws_ssh_backend" /etc/haproxy/haproxy.cfg; then
+        cp -f /etc/haproxy/haproxy.cfg /etc/haproxy/haproxy.cfg.bak.ssh
+        if curl -fsSL -H "Cache-Control: no-cache" "${RAW_REPO}limit/haproxy.cfg?t=$(date +%s)" -o /tmp/haproxy.cfg.ssh; then
+            mv -f /tmp/haproxy.cfg.ssh /etc/haproxy/haproxy.cfg
+            if haproxy -c -f /etc/haproxy/haproxy.cfg >/dev/null 2>&1; then
+                systemctl reload haproxy >/dev/null 2>&1 || systemctl restart haproxy >/dev/null 2>&1
+            else
+                mv -f /etc/haproxy/haproxy.cfg.bak.ssh /etc/haproxy/haproxy.cfg
+            fi
+        fi
+        rm -f /tmp/haproxy.cfg.ssh
+    fi
+
     # Catatan: /etc/xray/config.json sengaja tidak disentuh saat update demi keamanan data akun.
 }
 res1() {
     local ts
     ts=$(date +%s)
     rm -rf /tmp/vip-menu-upd /tmp/vip-menu-upd.zip
+
+    # Bersihkan proses menu Bash orphan lama (PPID=1, TTY=?) tanpa mengganggu sesi aktif
+    for p in $(pgrep -f '/usr/local/sbin/menu' 2>/dev/null || true); do
+        [[ "$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')" == "1" ]] && \
+        [[ "$(ps -o tty= -p "$p" 2>/dev/null | tr -d ' ')" == "?" ]] && \
+        kill "$p" 2>/dev/null || true
+    done
     mkdir -p /tmp/vip-menu-upd
     if curl -fsSL -H "Cache-Control: no-cache" "${RAW_REPO}limit/menu.zip?t=${ts}" -o /tmp/vip-menu-upd.zip || wget -q --no-cache -O /tmp/vip-menu-upd.zip "${RAW_REPO}limit/menu.zip?t=${ts}"; then
         unzip -o -q /tmp/vip-menu-upd.zip -d /tmp/vip-menu-upd
@@ -382,7 +403,9 @@ echo -e "  \033[1;91m update script, zevpn-limit, udpgw-rs, ws-rs & xray-lite\03
 fun_bar 'res1'
 echo -e "\033[1;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
 echo -e ""
-read -n 1 -s -r -p "Press [ Enter ] to back on menu"
+[[ -t 0 ]] || exit 0
+read -n 1 -s -r -p "Press [ Enter ] to back on menu" || exit 0
+[[ "${VIP_MENU_NESTED:-0}" == "1" ]] && exit 0
 menu
 
 ###########- COLOR CODE -##############

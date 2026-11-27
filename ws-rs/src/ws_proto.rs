@@ -1,30 +1,31 @@
 const WS_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
-const HTTP_METHODS: &[&[u8]] = &[
-    b"GET ",
-    b"POST ",
-    b"PUT ",
-    b"PATCH ",
-    b"DELETE ",
-    b"HEAD ",
-    b"OPTIONS ",
-    b"CONNECT ",
-    b"TRACE ",
-    b"PROPFIND ",
-];
-
-/// Returns `true` if the leading bytes match an HTTP/1.x request method (case-insensitive).
+/// Returns `true` if the leading bytes look like an HTTP/1.x or custom tunneling payload
+/// request line (e.g. `GET `, `CONNECT `, `BMOVE `, `ACL `, `PATCH `, etc.), while returning
+/// `false` for raw SSH banners (`SSH-2.0-...`) or binary TLS/OpenVPN frames.
 pub fn looks_like_http(buf: &[u8]) -> bool {
     if buf.len() < 4 {
         return false;
     }
-    HTTP_METHODS.iter().any(|m| {
-        buf.len() >= m.len()
-            && buf[..m.len()]
-                .iter()
-                .zip(m.iter())
-                .all(|(a, b)| a.to_ascii_uppercase() == *b)
-    })
+    // Raw SSH client banner or TLS ClientHello must pass through untouched.
+    if buf.starts_with(b"SSH-") || buf.starts_with(&[0x16, 0x03]) {
+        return false;
+    }
+    // Check first token (2..=16 ASCII letters/digits/'-') followed by a space.
+    let limit = buf.len().min(17);
+    let mut token_len = 0usize;
+    for &b in &buf[..limit] {
+        if b == b' ' {
+            return token_len >= 2;
+        }
+        if b.is_ascii_alphabetic() || b == b'-' {
+            token_len += 1;
+        } else {
+            return false;
+        }
+    }
+    // Still reading a plausible method token if buffer is shorter than 17 bytes.
+    token_len >= 2 && buf.len() < 17
 }
 
 /// Finds the byte index of `\r\n\r\n` marking the end of an HTTP header block.
@@ -36,9 +37,10 @@ pub fn find_header_end(buf: &[u8]) -> Option<usize> {
 pub struct ParsedHttpRequest {
     pub ws_key: Option<String>,
     pub real_ip: Option<String>,
+    pub has_upgrade: bool,
 }
 
-/// Extracts `Sec-WebSocket-Key` and `X-Forwarded-For` / `X-Real-IP` from raw HTTP request headers.
+/// Extracts `Sec-WebSocket-Key`, `Upgrade` presence, and `X-Forwarded-For`/`X-Real-IP`.
 pub fn parse_http_headers(header_bytes: &[u8]) -> ParsedHttpRequest {
     let mut parsed = ParsedHttpRequest::default();
     let text = String::from_utf8_lossy(header_bytes);
@@ -48,7 +50,9 @@ pub fn parse_http_headers(header_bytes: &[u8]) -> ParsedHttpRequest {
             if v.is_empty() {
                 continue;
             }
-            if k.eq_ignore_ascii_case("sec-websocket-key") {
+            if k.eq_ignore_ascii_case("upgrade") {
+                parsed.has_upgrade = true;
+            } else if k.eq_ignore_ascii_case("sec-websocket-key") {
                 parsed.ws_key = Some(v.to_string());
             } else if k.eq_ignore_ascii_case("x-forwarded-for") && parsed.real_ip.is_none() {
                 if let Some(first) = v.split(',').next().map(str::trim).filter(|s| !s.is_empty()) {
@@ -197,9 +201,12 @@ mod tests {
     }
 
     #[test]
-    fn detects_http_and_non_http() {
+    fn detects_http_and_custom_payload_methods() {
         assert!(looks_like_http(b"GET / HTTP/1.1\r\n"));
-        assert!(looks_like_http(b"connect 127.0.0.1:443 HTTP/1.1\r\n"));
+        assert!(looks_like_http(b"BMOVE / HTTP/1.1\r\n"));
+        assert!(looks_like_http(b"CONNECT 127.0.0.1:443 HTTP/1.1\r\n"));
+        assert!(looks_like_http(b"ACL / HTTP/1.1\r\n"));
         assert!(!looks_like_http(b"SSH-2.0-OpenSSH_9.2\r\n"));
+        assert!(!looks_like_http(&[0x16, 0x03, 0x01, 0x02, 0x00]));
     }
 }
