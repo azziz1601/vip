@@ -270,7 +270,8 @@ sync_multi_transport_configs() {
         if ! grep -q "^\[Unit\]" /etc/systemd/system/xray.service; then
             sed -i '1i [Unit]' /etc/systemd/system/xray.service
         fi
-        if ! grep -q "ExecReload=" /etc/systemd/system/xray.service; then
+        if ! grep -Fq 'ExecReload=/bin/kill -HUP $MAINPID' /etc/systemd/system/xray.service; then
+            sed -i '/^ExecReload=/d' /etc/systemd/system/xray.service
             sed -i '/^ExecStart=/a ExecReload=/bin/kill -HUP $MAINPID' /etc/systemd/system/xray.service
             systemctl daemon-reload >/dev/null 2>&1
         fi
