@@ -317,8 +317,34 @@ res1() {
     if curl -fsSL -H "Cache-Control: no-cache" "${RAW_REPO}limit/menu.zip?t=${ts}" -o /tmp/vip-menu-upd.zip || wget -q --no-cache -O /tmp/vip-menu-upd.zip "${RAW_REPO}limit/menu.zip?t=${ts}"; then
         unzip -o -q /tmp/vip-menu-upd.zip -d /tmp/vip-menu-upd
         chmod +x /tmp/vip-menu-upd/menu/*
+        cp -f /tmp/vip-menu-upd/menu/menu /usr/local/sbin/menu-legacy
+        chmod +x /usr/local/sbin/menu-legacy
         mv -f /tmp/vip-menu-upd/menu/* /usr/local/sbin/
         rm -f /usr/local/sbin/{addss,cekss,delss,m-ssws,renewss,trialss,user-ss}
+        # Pasang/perbarui Go TUI vip-menu (hanya aktifkan jika user tidak memilih rollback legacy)
+        local m_arch m_url
+        m_arch="$(uname -m)"
+        case "$m_arch" in
+            x86_64|amd64)  m_url="https://github.com/${GITHUB_REPO}/releases/latest/download/vip-menu-linux-amd64" ;;
+            aarch64|arm64) m_url="https://github.com/${GITHUB_REPO}/releases/latest/download/vip-menu-linux-arm64" ;;
+            *) m_url="" ;;
+        esac
+        if [[ -n "$m_url" ]] && (curl -fsSL "$m_url" -o /tmp/vip-menu.new || wget -q -O /tmp/vip-menu.new "$m_url"); then
+            chmod +x /tmp/vip-menu.new
+            if /tmp/vip-menu.new --version 2>&1 | grep -q "vip-menu"; then
+                mv -f /tmp/vip-menu.new /usr/local/bin/vip-menu
+                printf '#!/bin/bash\nexec /usr/local/bin/vip-menu --rollback\n' >/usr/local/sbin/menu-rollback
+                printf '#!/bin/bash\nexec /usr/local/bin/vip-menu --enable\n' >/usr/local/sbin/menu-tui
+                chmod +x /usr/local/sbin/menu-rollback /usr/local/sbin/menu-tui
+                if [[ ! -f /etc/xray/.use-legacy-menu ]]; then
+                    ln -sf /usr/local/bin/vip-menu /usr/local/sbin/menu
+                fi
+            else
+                rm -f /tmp/vip-menu.new
+            fi
+        else
+            rm -f /tmp/vip-menu.new
+        fi
     fi
     rm -rf /tmp/vip-menu-upd /tmp/vip-menu-upd.zip
 

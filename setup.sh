@@ -900,14 +900,47 @@ print_success "All Packet"
 #Instal Menu
 function menu(){
     clear
-    print_install "Memasang Menu Packet"
+    print_install "Memasang Menu Packet & Go TUI (vip-menu)"
     rm -rf /tmp/vip-menu /tmp/menu.zip
     mkdir -p /tmp/vip-menu
     wget -q --no-cache -O /tmp/menu.zip "${REPO}limit/menu.zip?t=$(date +%s)"
     unzip -o -q /tmp/menu.zip -d /tmp/vip-menu
     chmod +x /tmp/vip-menu/menu/*
+    cp -f /tmp/vip-menu/menu/menu /usr/local/sbin/menu-legacy
+    chmod +x /usr/local/sbin/menu-legacy
     mv -f /tmp/vip-menu/menu/* /usr/local/sbin/
     rm -rf /tmp/vip-menu /tmp/menu.zip
+
+    # Pasang Go TUI vip-menu (dengan rollback instan ke /usr/local/sbin/menu-legacy)
+    local m_arch m_url
+    m_arch="$(uname -m)"
+    case "$m_arch" in
+        x86_64|amd64)  m_url="https://github.com/azziz1601/vip/releases/latest/download/vip-menu-linux-amd64" ;;
+        aarch64|arm64) m_url="https://github.com/azziz1601/vip/releases/latest/download/vip-menu-linux-arm64" ;;
+        *) m_url="" ;;
+    esac
+    if [[ -n "$m_url" ]] && (curl -fsSL "$m_url" -o /tmp/vip-menu.new || wget -q -O /tmp/vip-menu.new "$m_url"); then
+        chmod +x /tmp/vip-menu.new
+        if /tmp/vip-menu.new --version 2>&1 | grep -q "vip-menu"; then
+            mv -f /tmp/vip-menu.new /usr/local/bin/vip-menu
+            cat >/usr/local/sbin/menu-rollback <<'EOF_RB'
+#!/bin/bash
+exec /usr/local/bin/vip-menu --rollback
+EOF_RB
+            cat >/usr/local/sbin/menu-tui <<'EOF_TUI'
+#!/bin/bash
+exec /usr/local/bin/vip-menu --enable
+EOF_TUI
+            chmod +x /usr/local/sbin/menu-rollback /usr/local/sbin/menu-tui
+            if [[ ! -f /etc/xray/.use-legacy-menu ]]; then
+                ln -sf /usr/local/bin/vip-menu /usr/local/sbin/menu
+            fi
+        else
+            rm -f /tmp/vip-menu.new
+        fi
+    else
+        rm -f /tmp/vip-menu.new
+    fi
 }
 
 # Membaut Default Menu 
