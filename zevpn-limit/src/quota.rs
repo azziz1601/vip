@@ -240,22 +240,42 @@ pub async fn run_cycle(
     }
 
     if need_restart && !dry_run {
-        eprintln!("[INFO] restarting xray service after quota enforcement");
-        match Command::new("systemctl")
-            .args(["restart", "xray"])
+        eprintln!("[INFO] hot-reloading xray service after quota enforcement");
+        let reloaded = match Command::new("systemctl")
+            .args(["reload", "xray"])
             .status()
             .await
         {
-            Ok(status) if !status.success() => {
+            Ok(status) if status.success() => true,
+            Ok(status) => {
                 eprintln!(
-                    "[WARN] systemctl restart xray exited with code {:?}",
+                    "[WARN] systemctl reload xray exited with code {:?}; falling back to restart",
                     status.code()
                 );
+                false
             }
             Err(err) => {
-                eprintln!("[WARN] failed to invoke systemctl restart xray: {err}");
+                eprintln!("[WARN] failed to invoke systemctl reload xray: {err}; falling back to restart");
+                false
             }
-            Ok(_) => {}
+        };
+        if !reloaded {
+            match Command::new("systemctl")
+                .args(["restart", "xray"])
+                .status()
+                .await
+            {
+                Ok(status) if !status.success() => {
+                    eprintln!(
+                        "[WARN] systemctl restart xray exited with code {:?}",
+                        status.code()
+                    );
+                }
+                Err(err) => {
+                    eprintln!("[WARN] failed to invoke systemctl restart xray: {err}");
+                }
+                Ok(_) => {}
+            }
         }
     }
 

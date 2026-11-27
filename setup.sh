@@ -637,11 +637,31 @@ print_success "Limit Quota Service"
 
 function ssh_slow(){
 clear
-# // Installing UDP Mini
-print_install "Memasang modul SlowDNS Server"
-    wget -q -O /tmp/nameserver "${REPO}limit/nameserver" >/dev/null 2>&1
-    chmod +x /tmp/nameserver
-    bash /tmp/nameserver | tee /root/install.log
+print_install "Memasang modul SlowDNS Server (HTTP Custom)"
+    local dom ns_dom my_ip
+    dom=$(cat /etc/xray/domain 2>/dev/null || echo "")
+    ns_dom=$(cat /etc/xray/dns 2>/dev/null || echo "")
+    if [[ -z "$ns_dom" ]]; then
+        local default_ns="ns.${dom:-example.com}"
+        read -rp "Masukkan Name Server (NS) SlowDNS [${default_ns}]: " ns_dom
+        ns_dom="${ns_dom:-$default_ns}"
+    fi
+    mkdir -p /etc/xray /etc/slowdns /root/slowdns
+    echo "$ns_dom" >/etc/xray/dns
+
+    my_ip=$(cat /root/.myip 2>/dev/null || curl -sS ipv4.icanhazip.com 2>/dev/null || echo "auto")
+    # Hapus rule redirect lama 53->5300 agar SlowDNS bisa memakai UDP 53 langsung dengan NOTRACK
+    iptables -t nat -D PREROUTING -p udp --dport 53 -j REDIRECT --to-ports 5300 2>/dev/null || true
+
+    if curl -fsSL "${REPO}limit/slowdns-linux-amd64.tar.gz" -o /tmp/slowdns.tar.gz || wget -q -O /tmp/slowdns.tar.gz "${REPO}limit/slowdns-linux-amd64.tar.gz"; then
+        tar -xzf /tmp/slowdns.tar.gz -C /root/slowdns
+        chmod +x /root/slowdns/slowdns /root/slowdns/install.sh
+        printf '%s\n%s\n%s\n%s\n' "$my_ip" "53" "$ns_dom" "127.0.0.1:143" | bash /root/slowdns/install.sh install | tee /root/install.log
+        if [[ -s /root/slowdns/server.pub ]]; then
+            ln -sf /root/slowdns/server.pub /etc/slowdns/server.pub
+        fi
+        rm -f /tmp/slowdns.tar.gz
+    fi
  print_success "SlowDNS"
 }
 
@@ -812,7 +832,7 @@ print_install "Menginstall ePro WebSocket Proxy"
         rm -f /tmp/ws.new
     fi
     if [[ "$WS_INSTALLED" -eq 0 ]]; then
-        wget -O /usr/bin/ws "${REPO}limit/ws" >/dev/null 2>&1
+        echo -e "[ERROR] Gagal mengunduh ws-rs dari GitHub Releases (${WS_URL})"
     fi
     wget -O /usr/bin/tun.conf "${REPO}limit/tun.conf" >/dev/null 2>&1
     wget -O /etc/systemd/system/ws.service "${REPO}limit/ws.service" >/dev/null 2>&1
@@ -831,17 +851,7 @@ wget -q -O /usr/local/share/xray/geoip.dat "https://github.com/Loyalsoldier/v2ra
 wget -O /usr/sbin/ftvpn "${REPO}limit/ftvpn" >/dev/null 2>&1
 chmod +x /usr/sbin/ftvpn
 wget -q ${REPO}limit/setrsyslog.sh && chmod +x setrsyslog.sh && ./setrsyslog.sh
-iptables -A FORWARD -m string --string "get_peers" --algo bm -j DROP
-iptables -A FORWARD -m string --string "announce_peer" --algo bm -j DROP
-iptables -A FORWARD -m string --string "find_node" --algo bm -j DROP
-iptables -A FORWARD -m string --algo bm --string "BitTorrent" -j DROP
-iptables -A FORWARD -m string --algo bm --string "BitTorrent protocol" -j DROP
-iptables -A FORWARD -m string --algo bm --string "peer_id=" -j DROP
-iptables -A FORWARD -m string --algo bm --string ".torrent" -j DROP
-iptables -A FORWARD -m string --algo bm --string "announce.php?passkey=" -j DROP
-iptables -A FORWARD -m string --algo bm --string "torrent" -j DROP
-iptables -A FORWARD -m string --algo bm --string "announce" -j DROP
-iptables -A FORWARD -m string --algo bm --string "info_hash" -j DROP
+# BitTorrent blocking handled in userspace by xray-lite-rs (zero kernel DPI CPU overhead)
 iptables-save > /etc/iptables.up.rules
 iptables-restore -t < /etc/iptables.up.rules
 netfilter-persistent save
@@ -932,8 +942,8 @@ cat >/etc/cron.d/xp_all <<-END
 		0 5 * * * root /sbin/reboot
 	END
 
-    echo "*/1 * * * * root echo -n > /var/log/nginx/access.log" >/etc/cron.d/log.nginx
-    echo "*/1 * * * * root echo -n > /var/log/xray/access.log" >>/etc/cron.d/log.xray
+    echo "0 */6 * * * root [ -f /var/log/nginx/access.log ] && truncate -s 0 /var/log/nginx/access.log" >/etc/cron.d/log.nginx
+    echo "0 */6 * * * root [ -f /var/log/xray/access.log ] && truncate -s 0 /var/log/xray/access.log" >/etc/cron.d/log.xray
     service cron restart
     cat >/home/daily_reboot <<-END
 		5
@@ -960,8 +970,7 @@ cat >/etc/rc.local <<EOF
 #!/bin/sh -e
 # rc.local
 # By default this script does nothing.
-iptables -I INPUT -p udp --dport 5300 -j ACCEPT
-iptables -t nat -I PREROUTING -p udp --dport 53 -j REDIRECT --to-ports 5300
+iptables -I INPUT -p udp --dport 53 -j ACCEPT
 systemctl restart netfilter-persistent
 exit 0
 EOF

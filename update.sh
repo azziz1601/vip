@@ -131,6 +131,45 @@ migrate_ws_rs() {
         rm -f /tmp/ws.new
     fi
 }
+sync_slowdns() {
+    mkdir -p /etc/slowdns /etc/xray
+    # Jika /root/slowdns/server.pub sudah ada, pastikan symlink & /etc/xray/dns tersinkron
+    if [[ -s /root/slowdns/server.pub ]]; then
+        ln -sf /root/slowdns/server.pub /etc/slowdns/server.pub
+    fi
+    if [[ ! -s /etc/xray/dns ]] && [[ -f /root/slowdns/slowdns.env ]]; then
+        local env_dom
+        env_dom=$(grep -E '^SLOWDNS_DOMAIN=' /root/slowdns/slowdns.env | head -n1 | cut -d= -f2- | tr -d '"'"'"'')
+        if [[ -n "$env_dom" ]]; then
+            echo "$env_dom" >/etc/xray/dns
+        fi
+    fi
+
+    # Jika SlowDNS belum terpasang sama sekali di /root/slowdns, pasang otomatis
+    if [[ ! -x /root/slowdns/slowdns ]]; then
+        local dom ns_dom my_ip
+        dom=$(cat /etc/xray/domain 2>/dev/null || echo "")
+        ns_dom=$(cat /etc/xray/dns 2>/dev/null || echo "")
+        if [[ -z "$ns_dom" && -n "$dom" ]]; then
+            ns_dom="ns.${dom}"
+            echo "$ns_dom" >/etc/xray/dns
+        fi
+        if [[ -n "$ns_dom" ]]; then
+            mkdir -p /root/slowdns
+            my_ip=$(cat /root/.myip 2>/dev/null || curl -sS ipv4.icanhazip.com 2>/dev/null || echo "auto")
+            iptables -t nat -D PREROUTING -p udp --dport 53 -j REDIRECT --to-ports 5300 2>/dev/null || true
+            if curl -fsSL -H "Cache-Control: no-cache" "${RAW_REPO}limit/slowdns-linux-amd64.tar.gz?t=$(date +%s)" -o /tmp/slowdns.tar.gz; then
+                tar -xzf /tmp/slowdns.tar.gz -C /root/slowdns
+                chmod +x /root/slowdns/slowdns /root/slowdns/install.sh
+                printf '%s\n%s\n%s\n%s\n' "$my_ip" "53" "$ns_dom" "127.0.0.1:143" | bash /root/slowdns/install.sh install >/dev/null 2>&1 || true
+                if [[ -s /root/slowdns/server.pub ]]; then
+                    ln -sf /root/slowdns/server.pub /etc/slowdns/server.pub
+                fi
+            fi
+            rm -f /tmp/slowdns.tar.gz
+        fi
+    fi
+}
 sync_multi_transport_configs() {
     local domain
     domain=$(cat /etc/xray/domain 2>/dev/null || echo "localhost")
@@ -192,6 +231,38 @@ sync_multi_transport_configs() {
         else
             mv -f /etc/haproxy/haproxy.cfg.bak /etc/haproxy/haproxy.cfg
         fi
+    fi
+
+    # 2a1. Sinkronkan PROXY protocol (real IP) di HAProxy & Nginx secara berpasangan + perbaiki cron log
+    if [[ -f /etc/haproxy/haproxy.cfg ]] && [[ -f /etc/nginx/conf.d/xray.conf ]] && ! grep -q "send-proxy" /etc/haproxy/haproxy.cfg; then
+        cp -f /etc/haproxy/haproxy.cfg /etc/haproxy/haproxy.cfg.bak.pp
+        cp -f /etc/nginx/conf.d/xray.conf /etc/nginx/conf.d/xray.conf.bak.pp
+        if curl -fsSL -H "Cache-Control: no-cache" "${RAW_REPO}limit/haproxy.cfg?t=$(date +%s)" -o /tmp/haproxy.cfg.pp && \
+           curl -fsSL -H "Cache-Control: no-cache" "${RAW_REPO}limit/xray.conf?t=$(date +%s)" -o /tmp/xray.conf.pp; then
+            sed -i "s/xxx/${domain}/g" /tmp/xray.conf.pp
+            mv -f /tmp/xray.conf.pp /etc/nginx/conf.d/xray.conf
+            mv -f /tmp/haproxy.cfg.pp /etc/haproxy/haproxy.cfg
+            if nginx -t >/dev/null 2>&1 && haproxy -c -f /etc/haproxy/haproxy.cfg >/dev/null 2>&1; then
+                systemctl reload nginx >/dev/null 2>&1 || systemctl restart nginx >/dev/null 2>&1
+                systemctl reload haproxy >/dev/null 2>&1 || systemctl restart haproxy >/dev/null 2>&1
+            else
+                mv -f /etc/nginx/conf.d/xray.conf.bak.pp /etc/nginx/conf.d/xray.conf
+                mv -f /etc/haproxy/haproxy.cfg.bak.pp /etc/haproxy/haproxy.cfg
+            fi
+        fi
+        rm -f /tmp/haproxy.cfg.pp /tmp/xray.conf.pp
+    fi
+    if [[ -f /etc/cron.d/log.nginx ]] && grep -q "\*/1 " /etc/cron.d/log.nginx; then
+        echo "0 */6 * * * root [ -f /var/log/nginx/access.log ] && truncate -s 0 /var/log/nginx/access.log" >/etc/cron.d/log.nginx
+    fi
+    if [[ -f /etc/cron.d/log.xray ]] && grep -q "\*/1 " /etc/cron.d/log.xray; then
+        echo "0 */6 * * * root [ -f /var/log/xray/access.log ] && truncate -s 0 /var/log/xray/access.log" >/etc/cron.d/log.xray
+    fi
+
+    # 2a2. Pastikan izin log Xray dimiliki www-data agar xray.service bisa menulis access/error log
+    if [[ -d /var/log/xray ]]; then
+        touch /var/log/xray/access.log /var/log/xray/error.log 2>/dev/null || true
+        chown -R www-data:www-data /var/log/xray 2>/dev/null || true
     fi
 
     # 2b. Pastikan xray.service punya [Unit] dan ExecReload=SIGHUP untuk hot-reload xray-lite-rs
@@ -279,6 +350,9 @@ res1() {
 
     # Migrasi otomatis /usr/bin/ws ke ws-rs dari GitHub Releases (skip jika sudah terpasang)
     migrate_ws_rs
+
+    # Pasang / sinkronkan SlowDNS (NS & Pub Key)
+    sync_slowdns
 
     # Sinkronisasi multi-transport (WS, gRPC, HTTPUpgrade, XHTTP) + migrasi akun lama
     sync_multi_transport_configs
