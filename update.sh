@@ -136,6 +136,36 @@ sync_multi_transport_configs() {
         rm -f /tmp/haproxy.cfg.new
     fi
 
+    # 2a. Tuning stabilitas Nginx & HAProxy (hindari worker timeout & broadcast grpc_backend DOWN)
+    local nginx_changed=0
+    if [[ -f /etc/nginx/nginx.conf ]]; then
+        if ! grep -q "worker_shutdown_timeout" /etc/nginx/nginx.conf; then
+            sed -i '/^worker_processes/a worker_shutdown_timeout 10s;' /etc/nginx/nginx.conf
+            nginx_changed=1
+        fi
+        if grep -q "worker_connections 1024;" /etc/nginx/nginx.conf; then
+            sed -i 's/worker_connections 1024;/worker_connections 4096;/g' /etc/nginx/nginx.conf
+            nginx_changed=1
+        fi
+    fi
+    if [[ -f /etc/nginx/conf.d/xray.conf ]] && grep -q "86400000m" /etc/nginx/conf.d/xray.conf; then
+        sed -i 's/86400000m/360s/g' /etc/nginx/conf.d/xray.conf
+        nginx_changed=1
+    fi
+    if [[ "$nginx_changed" -eq 1 ]] && nginx -t >/dev/null 2>&1; then
+        systemctl reload nginx >/dev/null 2>&1 || systemctl restart nginx >/dev/null 2>&1
+    fi
+    if [[ -f /etc/haproxy/haproxy.cfg ]] && grep -qE 'server (dropbear_server|ws_server|grpc_server) 127\.0\.0\.1:[0-9]+ check' /etc/haproxy/haproxy.cfg; then
+        cp -f /etc/haproxy/haproxy.cfg /etc/haproxy/haproxy.cfg.bak
+        sed -i -E 's/(server (dropbear_server|ws_server|grpc_server) 127\.0\.0\.1:[0-9]+) check/\1/g' /etc/haproxy/haproxy.cfg
+        sed -i '/^[[:space:]]*option httplog$/d' /etc/haproxy/haproxy.cfg
+        if haproxy -c -f /etc/haproxy/haproxy.cfg >/dev/null 2>&1; then
+            systemctl reload haproxy >/dev/null 2>&1 || systemctl restart haproxy >/dev/null 2>&1
+        else
+            mv -f /etc/haproxy/haproxy.cfg.bak /etc/haproxy/haproxy.cfg
+        fi
+    fi
+
     # 2b. Pastikan xray.service punya [Unit] dan ExecReload=SIGHUP untuk hot-reload xray-lite-rs
     if [[ -f /etc/systemd/system/xray.service ]]; then
         if ! grep -q "^\[Unit\]" /etc/systemd/system/xray.service; then
