@@ -736,7 +736,7 @@ func CheckXrayLoginsFromLog(logPath string, users []string, p Protocol) string {
 }
 
 func CheckSSHLogins() string {
-	out, err := exec.Command("bash", "-c", "who 2>/dev/null || true").Output()
+	out, _ := exec.Command("bash", "-c", "who 2>/dev/null || true").Output()
 	var b strings.Builder
 	b.WriteString("◇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◇\n")
 	b.WriteString("  USER LOGIN SSH\n")
