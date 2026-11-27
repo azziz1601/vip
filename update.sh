@@ -276,52 +276,38 @@ sync_multi_transport_configs() {
         fi
     fi
 
-    # 3. Sinkronkan /etc/xray/config.json: tambahkan inbound HTTPUpgrade & XHTTP + klon user eksisting
-    if [[ -f /etc/xray/config.json ]] && ! grep -q "#vmessxhttp" /etc/xray/config.json; then
-        cp -f /etc/xray/config.json /etc/xray/config.json.bak
-        if curl -fsSL -H "Cache-Control: no-cache" "${RAW_REPO}limit/config.json?t=$(date +%s)" -o /tmp/xray-config.base.json; then
-            # Klon seluruh user eksisting dari config lama ke semua transport baru
-            awk '/^#& /{h=$0; getline; print h "\n" $0}' /etc/xray/config.json.bak | sort -u > /tmp/vless.users.tmp
-            awk '/^### /{h=$0; getline; print h "\n" $0}' /etc/xray/config.json.bak | sort -u > /tmp/vmess.users.tmp
-            awk '/^#! /{h=$0; getline; print h "\n" $0}' /etc/xray/config.json.bak | sort -u > /tmp/trojan.users.tmp
+    # 2c. Perbarui /usr/bin/limit-ip ke versi aman (notify-only, tanpa hapus akun)
+    if curl -fsSL -H "Cache-Control: no-cache" "${RAW_REPO}limit/limit-ip?t=$(date +%s)" -o /tmp/limit-ip.new; then
+        chmod +x /tmp/limit-ip.new
+        mv -f /tmp/limit-ip.new /usr/bin/limit-ip
+        for svc in vmip vlip trip; do
+            if systemctl is-active --quiet "$svc" 2>/dev/null; then
+                systemctl restart "$svc" >/dev/null 2>&1 || true
+            fi
+        done
+    fi
+    rm -f /tmp/limit-ip.new
 
-            python3 - <<'PYMERGE' 2>/dev/null || true
-from pathlib import Path
-base = Path("/tmp/xray-config.base.json").read_text()
-def extract_blocks(path, prefix):
-    lines = Path(path).read_text().splitlines()
-    seen, out = set(), []
-    i = 0
-    while i + 1 < len(lines):
-        if lines[i].startswith(prefix + " ") and lines[i+1].lstrip().startswith("},{"):
-            key = lines[i].split()[1]
-            if key not in seen:
-                seen.add(key)
-                out.append(lines[i] + "\n" + lines[i+1])
-            i += 2
-        else:
-            i += 1
-    return "\n".join(out)
-
-for prefix, markers in [
-    ("#&", ["#vless", "#vlessgrpc", "#vlesshu", "#vlessxhttp"]),
-    ("###", ["#vmess", "#vmessgrpc", "#vmesshu", "#vmessxhttp"]),
-    ("#!", ["#trojanws", "#trojangrpc", "#trojanhu", "#trojanxhttp"]),
-]:
-    blk = extract_blocks("/etc/xray/config.json.bak", prefix)
-    if blk:
-        for mk in markers:
-            base = base.replace(mk + "\n", mk + "\n" + blk + "\n", 1)
-Path("/tmp/xray-config.merged.json").write_text(base)
-PYMERGE
-
-            if [[ -s /tmp/xray-config.merged.json ]] && /usr/local/bin/xray -t -config /tmp/xray-config.merged.json >/dev/null 2>&1; then
-                mv -f /tmp/xray-config.merged.json /etc/xray/config.json
-                systemctl restart xray >/dev/null 2>&1
+    # 2d. Sinkronkan map $client_real_ip (CF-Connecting-IP + real IP direct) pada Nginx
+    if [[ -f /etc/nginx/nginx.conf ]] && ! grep -q "client_real_ip" /etc/nginx/nginx.conf; then
+        cp -f /etc/nginx/nginx.conf /etc/nginx/nginx.conf.bak.cf
+        cp -f /etc/nginx/conf.d/xray.conf /etc/nginx/conf.d/xray.conf.bak.cf 2>/dev/null || true
+        if curl -fsSL -H "Cache-Control: no-cache" "${RAW_REPO}limit/nginx.conf?t=$(date +%s)" -o /tmp/nginx.conf.cf && \
+           curl -fsSL -H "Cache-Control: no-cache" "${RAW_REPO}limit/xray.conf?t=$(date +%s)" -o /tmp/xray.conf.cf; then
+            sed -i "s/xxx/${domain}/g" /tmp/xray.conf.cf
+            mv -f /tmp/nginx.conf.cf /etc/nginx/nginx.conf
+            mv -f /tmp/xray.conf.cf /etc/nginx/conf.d/xray.conf
+            if nginx -t >/dev/null 2>&1; then
+                systemctl reload nginx >/dev/null 2>&1 || systemctl restart nginx >/dev/null 2>&1
+            else
+                mv -f /etc/nginx/nginx.conf.bak.cf /etc/nginx/nginx.conf
+                [[ -f /etc/nginx/conf.d/xray.conf.bak.cf ]] && mv -f /etc/nginx/conf.d/xray.conf.bak.cf /etc/nginx/conf.d/xray.conf
             fi
         fi
-        rm -f /tmp/xray-config.base.json /tmp/xray-config.merged.json /tmp/vless.users.tmp /tmp/vmess.users.tmp /tmp/trojan.users.tmp
+        rm -f /tmp/nginx.conf.cf /tmp/xray.conf.cf
     fi
+
+    # Catatan: /etc/xray/config.json sengaja tidak disentuh saat update demi keamanan data akun.
 }
 res1() {
     local ts

@@ -257,7 +257,7 @@ pub fn remove_user_from_xray_config(
             }
             out.push_str(line);
             out.push('\n');
-        } else if line.starts_with("},{") {
+        } else if line.trim_start().starts_with("},{") {
             skipping = false;
         }
     }
