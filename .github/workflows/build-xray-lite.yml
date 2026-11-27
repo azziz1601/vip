@@ -1,0 +1,147 @@
+name: Build & Test xray-lite-rs
+
+on:
+  push:
+    branches: ["main", "master"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Run Unit & Integration Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-test-
+
+      - name: Run cargo test
+        run: cargo test --verbose
+
+  build:
+    name: Build Static Linux Binary (${{ matrix.target }})
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            arch: amd64
+            apt_packages: ""
+            cc_env: CC_x86_64_unknown_linux_musl
+            cc: gcc
+            linker_env: ""
+            linker: ""
+          - target: aarch64-unknown-linux-musl
+            arch: arm64
+            apt_packages: gcc-aarch64-linux-gnu
+            cc_env: CC_aarch64_unknown_linux_musl
+            cc: aarch64-linux-gnu-gcc
+            linker_env: CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER
+            linker: aarch64-linux-gnu-gcc
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install cross-compile toolchain
+        if: matrix.apt_packages != ''
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ matrix.apt_packages }}
+
+      - name: Setup Rust toolchain (${{ matrix.target }})
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-${{ matrix.target }}-
+
+      - name: Build static release binary
+        env:
+          RUSTFLAGS: "-C target-feature=+crt-static -C relocation-model=static"
+        run: |
+          if [ -n "${{ matrix.cc_env }}" ]; then
+            export ${{ matrix.cc_env }}=${{ matrix.cc }}
+          fi
+          if [ -n "${{ matrix.linker_env }}" ]; then
+            export ${{ matrix.linker_env }}=${{ matrix.linker }}
+          fi
+          cargo build --release --target ${{ matrix.target }}
+          file target/${{ matrix.target }}/release/xray-lite
+          file target/${{ matrix.target }}/release/xray-lite | grep -q "statically linked"
+
+      - name: Smoke test native binary
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          ./target/${{ matrix.target }}/release/xray-lite --version
+          ./target/${{ matrix.target }}/release/xray-lite -t -c config.example.json
+
+      - name: Package release archive
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/xray-lite dist/
+          cp xray-lite.service config.example.json README.md dist/
+          tar -czf xray-lite-linux-${{ matrix.arch }}.tar.gz -C dist .
+          cp target/${{ matrix.target }}/release/xray-lite xray-lite-linux-${{ matrix.arch }}
+          sha256sum xray-lite-linux-${{ matrix.arch }} xray-lite-linux-${{ matrix.arch }}.tar.gz > SHA256SUMS-${{ matrix.arch }}.txt
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: xray-lite-linux-${{ matrix.arch }}
+          path: |
+            xray-lite-linux-${{ matrix.arch }}
+            xray-lite-linux-${{ matrix.arch }}.tar.gz
+            SHA256SUMS-${{ matrix.arch }}.txt
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
