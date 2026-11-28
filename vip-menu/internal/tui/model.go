@@ -11,8 +11,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/azziz1601/vip/vip-menu/internal/accounts"
-	"github.com/azziz1601/vip/vip-menu/internal/rollback"
 	"github.com/azziz1601/vip/vip-menu/internal/sysinfo"
+	"github.com/azziz1601/vip/vip-menu/internal/sysops"
 )
 
 type viewID int
@@ -24,7 +24,8 @@ const (
 	viewServices
 	viewSlowDNS
 	viewBackup
-	viewRollbackConfirm
+	viewAutoReboot
+	viewAutokill
 	viewForm
 	viewPickUser
 )
@@ -49,6 +50,10 @@ const (
 	formRenewAccount
 	formChangeIPLimit
 	formChangeQuotaGB
+	formChangeDomain
+	formBotNotif
+	formLimitSpeed
+	formRestoreBackup
 )
 
 type formField struct {
@@ -69,7 +74,6 @@ type serviceActionMsg struct {
 	action  string
 	err     error
 }
-type rollbackDoneMsg struct{ err error }
 
 type Model struct {
 	version string
@@ -86,6 +90,7 @@ type Model struct {
 	fFields    []formField
 	fFocus     int
 	fTargetUsr string
+	fBack      viewID
 
 	pAction pickAction
 	pUsers  []sysinfo.Account
@@ -94,7 +99,6 @@ type Model struct {
 }
 
 var (
-	// Calm slate palette (no neon/glow)
 	colorLine    = lipgloss.Color("#475569")
 	colorSubLine = lipgloss.Color("#334155")
 	colorHeader  = lipgloss.Color("#1E293B")
@@ -174,9 +178,9 @@ func (m Model) itemsForCurrentView() []menuItem {
 			{Key: "5", Label: "System", Run: goView(viewSystem)},
 			{Key: "6", Label: "Services", Run: goView(viewServices)},
 			{Key: "7", Label: "SlowDNS", Run: goView(viewSlowDNS)},
-			{Key: "8", Label: "Update", Run: runUpdateScript()},
+			{Key: "8", Label: "Update", Run: runUpdateClean()},
 			{Key: "9", Label: "Backup", Run: goView(viewBackup)},
-			{Key: "0", Label: "Classic Menu", Run: goView(viewRollbackConfirm)},
+			{Key: "0", Label: "Exit", Run: func(m *Model) tea.Cmd { return tea.Quit }},
 		}
 	case viewProtoMenu:
 		if m.proto == accounts.ProtoSSH {
@@ -187,13 +191,13 @@ func (m Model) itemsForCurrentView() []menuItem {
 				{Key: "4", Label: "Active Logins", Run: runCheckLogins()},
 				{Key: "5", Label: "Member List", Run: runListMembers()},
 				{Key: "6", Label: "Delete Account", Run: openPicker(pickDelete)},
-				{Key: "7", Label: "Clean Expired", Run: runMaintenance("EXPIRED SSH ACCOUNTS", accounts.CleanExpiredSSH, viewProtoMenu)},
+				{Key: "7", Label: "Clean Expired", Run: runReport("EXPIRED SSH ACCOUNTS", accounts.CleanExpiredSSH, viewProtoMenu)},
 				{Key: "8", Label: "Edit IP Limit", Run: openPicker(pickChangeIP)},
 				{Key: "9", Label: "Lock Account", Run: openPicker(pickLock)},
 				{Key: "a", Label: "Unlock Account", Run: openPicker(pickUnlock)},
 				{Key: "b", Label: "Account Config", Run: openPicker(pickDetail)},
-				{Key: "c", Label: "Autokill", Run: runExternal("autokill")},
-				{Key: "d", Label: "Multi Login Check", Run: runExternal("ceklim")},
+				{Key: "c", Label: "Autokill", Run: goView(viewAutokill)},
+				{Key: "d", Label: "Multi Login Check", Run: runReport("MULTI LOGIN CHECK", sysops.MultiLoginSSH, viewProtoMenu)},
 				{Key: "0", Label: "Back", Run: goView(viewDashboard)},
 			}
 		}
@@ -213,25 +217,50 @@ func (m Model) itemsForCurrentView() []menuItem {
 		}
 	case viewSystem:
 		return []menuItem{
-			{Key: "1", Label: "Clean Expired Accounts", Run: runMaintenance("CLEAN EXPIRED", accounts.CleanAllExpired, viewSystem)},
-			{Key: "2", Label: "Clear Cache & Logs", Run: runMaintenance("CLEAR CACHE & LOGS", accounts.ClearCacheAndLogs, viewSystem)},
-			{Key: "3", Label: "Bandwidth Monitor", Run: runExternal("bw")},
-			{Key: "4", Label: "Speedtest", Run: runExternal("speedtest")},
-			{Key: "5", Label: "Limit Speed", Run: runExternal("limitspeed")},
-			{Key: "6", Label: "Change Domain", Run: runExternal("addhost")},
-			{Key: "7", Label: "Renew SSL Certificate", Run: runExternal("fixcert")},
-			{Key: "8", Label: "Auto Reboot", Run: runExternal("autoreboot")},
-			{Key: "9", Label: "Telegram Bot", Run: runExternal("mbot")},
-			{Key: "a", Label: "Bot Notifications", Run: runExternal("add-bot-notif")},
-			{Key: "b", Label: "Port Information", Run: runExternal("prot")},
-			{Key: "c", Label: "More Utilities", Run: runExternal("utility")},
+			{Key: "1", Label: "Clean Expired Accounts", Run: runReport("CLEAN EXPIRED", accounts.CleanAllExpired, viewSystem)},
+			{Key: "2", Label: "Clear Cache & Logs", Run: runReport("CLEAR CACHE & LOGS", accounts.ClearCacheAndLogs, viewSystem)},
+			{Key: "3", Label: "Bandwidth Monitor", Run: runReport("BANDWIDTH", sysops.BandwidthReport, viewSystem)},
+			{Key: "4", Label: "Speedtest", Run: runReport("SPEEDTEST", sysops.RunSpeedtest, viewSystem)},
+			{Key: "5", Label: "Limit Speed", Run: openSysForm(formLimitSpeed, "LIMIT SPEED", []formField{
+				{Label: "Download Mbps", Value: "0", Numeric: true},
+				{Label: "Upload Mbps  ", Value: "0", Numeric: true},
+			}, viewSystem)},
+			{Key: "6", Label: "Change Domain", Run: openSysForm(formChangeDomain, "CHANGE DOMAIN", []formField{
+				{Label: "New Domain   ", Value: ""},
+			}, viewSystem)},
+			{Key: "7", Label: "Renew SSL Certificate", Run: runReport("RENEW SSL", sysops.RenewSSL, viewSystem)},
+			{Key: "8", Label: "Auto Reboot", Run: goView(viewAutoReboot)},
+			{Key: "9", Label: "Bot Notifications", Run: openSysForm(formBotNotif, "TELEGRAM NOTIFICATIONS", []formField{
+				{Label: "Bot Token    ", Value: ""},
+				{Label: "Chat ID      ", Value: ""},
+			}, viewSystem)},
+			{Key: "a", Label: "Port Information", Run: runReport("PORTS", sysops.PortInfo, viewSystem)},
 			{Key: "0", Label: "Back", Run: goView(viewDashboard)},
+		}
+	case viewAutoReboot:
+		return []menuItem{
+			{Key: "1", Label: "Daily at 05:00", Run: runReport("AUTO REBOOT", func() string { return sysops.SetAutoReboot("0 5 * * *") }, viewSystem)},
+			{Key: "2", Label: "Every 12 Hours", Run: runReport("AUTO REBOOT", func() string { return sysops.SetAutoReboot("0 */12 * * *") }, viewSystem)},
+			{Key: "3", Label: "Weekly on Sunday", Run: runReport("AUTO REBOOT", func() string { return sysops.SetAutoReboot("0 5 * * 0") }, viewSystem)},
+			{Key: "4", Label: "Disable Auto Reboot", Run: runReport("AUTO REBOOT", func() string { return sysops.SetAutoReboot("off") }, viewSystem)},
+			{Key: "0", Label: "Back", Run: goView(viewSystem)},
+		}
+	case viewAutokill:
+		return []menuItem{
+			{Key: "1", Label: "Every 5 Minutes", Run: runReport("AUTOKILL", func() string { return sysops.SetAutokill(5) }, viewProtoMenu)},
+			{Key: "2", Label: "Every 10 Minutes", Run: runReport("AUTOKILL", func() string { return sysops.SetAutokill(10) }, viewProtoMenu)},
+			{Key: "3", Label: "Every 15 Minutes", Run: runReport("AUTOKILL", func() string { return sysops.SetAutokill(15) }, viewProtoMenu)},
+			{Key: "4", Label: "Disable Autokill", Run: runReport("AUTOKILL", func() string { return sysops.SetAutokill(0) }, viewProtoMenu)},
+			{Key: "0", Label: "Back", Run: goView(viewProtoMenu)},
 		}
 	case viewBackup:
 		return []menuItem{
-			{Key: "1", Label: "Backup Data", Run: runExternal("backup")},
-			{Key: "2", Label: "Restore Data", Run: runExternal("restore")},
-			{Key: "3", Label: "Auto Backup", Run: runExternal("autobackup")},
+			{Key: "1", Label: "Backup Data", Run: runReport("BACKUP", sysops.BackupData, viewBackup)},
+			{Key: "2", Label: "Restore Data", Run: openSysForm(formRestoreBackup, "RESTORE BACKUP", []formField{
+				{Label: "Archive Path ", Value: "/root/"},
+			}, viewBackup)},
+			{Key: "3", Label: "Enable Auto Backup", Run: runReport("AUTO BACKUP", func() string { return sysops.ToggleAutoBackup(true) }, viewBackup)},
+			{Key: "4", Label: "Disable Auto Backup", Run: runReport("AUTO BACKUP", func() string { return sysops.ToggleAutoBackup(false) }, viewBackup)},
 			{Key: "0", Label: "Back", Run: goView(viewDashboard)},
 		}
 	case viewServices:
@@ -250,11 +279,6 @@ func (m Model) itemsForCurrentView() []menuItem {
 		return []menuItem{
 			{Key: "1", Label: "Restart SlowDNS", Run: runServiceAction("slowdns", "restart")},
 			{Key: "0", Label: "Back", Run: goView(viewDashboard)},
-		}
-	case viewRollbackConfirm:
-		return []menuItem{
-			{Key: "y", Label: "Switch to Classic Menu", Run: runRollback()},
-			{Key: "n", Label: "Cancel", Run: goView(viewDashboard)},
 		}
 	}
 	return nil
@@ -281,10 +305,24 @@ func openProto(p accounts.Protocol) func(m *Model) tea.Cmd {
 	}
 }
 
+func openSysForm(mode formMode, title string, fields []formField, back viewID) func(m *Model) tea.Cmd {
+	return func(m *Model) tea.Cmd {
+		m.fMode = mode
+		m.fTitle = title
+		m.fFields = fields
+		m.fFocus = 0
+		m.fBack = back
+		m.notice = ""
+		m.view = viewForm
+		return nil
+	}
+}
+
 func startCreateForm() func(m *Model) tea.Cmd {
 	return func(m *Model) tea.Cmd {
 		m.view = viewForm
 		m.fFocus = 0
+		m.fBack = viewProtoMenu
 		m.notice = ""
 		if m.proto == accounts.ProtoSSH {
 			m.fMode = formCreateSSH
@@ -397,7 +435,7 @@ func runCheckLogins() func(m *Model) tea.Cmd {
 	}
 }
 
-func runMaintenance(title string, fn func() string, back viewID) func(m *Model) tea.Cmd {
+func runReport(title string, fn func() string, back viewID) func(m *Model) tea.Cmd {
 	return func(m *Model) tea.Cmd {
 		body := fn()
 		m.snap = sysinfo.Collect()
@@ -406,26 +444,26 @@ func runMaintenance(title string, fn func() string, back viewID) func(m *Model) 
 	}
 }
 
-func runExternal(name string) func(m *Model) tea.Cmd {
+func runUpdateClean() func(m *Model) tea.Cmd {
 	return func(m *Model) tea.Cmd {
-		path := "/usr/local/sbin/" + name
-		if _, err := os.Stat(path); err != nil {
-			if found, lerr := exec.LookPath(name); lerr == nil {
-				path = found
-			}
-		}
-		cmd := exec.Command(path)
-		cmd.Env = append(os.Environ(), "VIP_MENU_NESTED=1")
-		return tea.ExecProcess(cmd, func(err error) tea.Msg { return execFinishedMsg{err: err} })
-	}
-}
-
-func runUpdateScript() func(m *Model) tea.Cmd {
-	return func(m *Model) tea.Cmd {
-		script := `SHA=$(curl -fsSL -H "Accept: application/vnd.github.sha" "https://api.github.com/repos/azziz1601/vip/commits/main" 2>/dev/null | tr -dc 'a-fA-F0-9'); REF="${SHA:-main}"; curl -fsSL -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/azziz1601/vip/${REF}/update.sh?t=$(date +%s)" -o /tmp/update.sh && chmod +x /tmp/update.sh && bash /tmp/update.sh`
+		script := `clear
+printf "\033[1;37mSYSTEM UPDATE\033[0m\n────────────────────────────────────────────────\n"
+echo "Checking latest release..."
+SHA=$(curl -fsSL -H "Accept: application/vnd.github.sha" "https://api.github.com/repos/azziz1601/vip/commits/main" 2>/dev/null | tr -dc 'a-fA-F0-9')
+REF="${SHA:-main}"
+echo "Applying update..."
+if curl -fsSL -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/azziz1601/vip/${REF}/update.sh?t=$(date +%s)" -o /tmp/update.sh; then
+  chmod +x /tmp/update.sh
+  VIP_MENU_NESTED=1 bash /tmp/update.sh </dev/null >/dev/null 2>&1
+  rm -f /tmp/update.sh
+  echo "Update complete."
+else
+  echo "Update failed."
+fi
+printf "\n\033[90mPress Enter to return...\033[0m"
+read -r _ || true`
 		cmd := exec.Command("bash", "-c", script)
-		cmd.Env = append(os.Environ(), "VIP_MENU_NESTED=1")
-		return tea.ExecProcess(cmd, func(err error) tea.Msg { return execFinishedMsg{err: err} })
+		return tea.ExecProcess(cmd, func(err error) tea.Msg { return execFinishedMsg{err: nil} })
 	}
 }
 
@@ -435,12 +473,6 @@ func runServiceAction(service, action string) func(m *Model) tea.Cmd {
 			err := exec.Command("systemctl", action, service).Run()
 			return serviceActionMsg{service: service, action: action, err: err}
 		}
-	}
-}
-
-func runRollback() func(m *Model) tea.Cmd {
-	return func(m *Model) tea.Cmd {
-		return func() tea.Msg { return rollbackDoneMsg{err: rollback.RollbackToLegacy()} }
 	}
 }
 
@@ -543,15 +575,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case rollbackDoneMsg:
-		if msg.err != nil {
-			m.notice = errStyle.Render("Rollback failed: " + msg.err.Error())
-			m.view = viewDashboard
-			m.cursor = 0
-			return m, nil
-		}
-		return m, tea.Quit
-
 	case tea.KeyMsg:
 		if m.view == viewForm {
 			return m.updateForm(msg)
@@ -571,11 +594,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice = ""
 			return m, nil
 		case "esc", "backspace":
-			if m.view != viewDashboard {
+			if m.view == viewAutoReboot {
+				m.view = viewSystem
+			} else if m.view == viewAutokill {
+				m.view = viewProtoMenu
+			} else if m.view != viewDashboard {
 				m.view = viewDashboard
-				m.cursor = 0
-				m.notice = ""
 			}
+			m.cursor = 0
+			m.notice = ""
 			return m, nil
 		case "r":
 			m.snap = sysinfo.Collect()
@@ -616,7 +643,7 @@ func (m Model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		return m, tea.Quit
 	case "esc":
-		m.view = viewProtoMenu
+		m.view = m.fBack
 		m.cursor = 0
 		m.notice = ""
 		return m, nil
@@ -735,6 +762,43 @@ func (m Model) submitForm() (tea.Model, tea.Cmd) {
 		m.view = viewProtoMenu
 		m.cursor = 0
 		return m, nil
+
+	case formChangeDomain:
+		dom := strings.TrimSpace(m.fFields[0].Value)
+		if err := sysops.ChangeDomain(dom); err != nil {
+			m.notice = errStyle.Render(err.Error())
+			return m, nil
+		}
+		m.snap = sysinfo.Collect()
+		m.notice = okStyle.Render("Domain updated to " + dom)
+		m.view = viewSystem
+		m.cursor = 0
+		return m, nil
+
+	case formBotNotif:
+		if err := sysops.ConfigureBotNotif(m.fFields[0].Value, m.fFields[1].Value); err != nil {
+			m.notice = errStyle.Render(err.Error())
+			return m, nil
+		}
+		m.notice = okStyle.Render("Telegram notifications saved")
+		m.view = viewSystem
+		m.cursor = 0
+		return m, nil
+
+	case formLimitSpeed:
+		down, _ := strconv.Atoi(m.fFields[0].Value)
+		up, _ := strconv.Atoi(m.fFields[1].Value)
+		res := sysops.SetLimitSpeed(down, up)
+		m.view = viewSystem
+		m.cursor = 0
+		return m, showInTerminal("LIMIT SPEED", res)
+
+	case formRestoreBackup:
+		res := sysops.RestoreData(m.fFields[0].Value)
+		m.snap = sysinfo.Collect()
+		m.view = viewBackup
+		m.cursor = 0
+		return m, showInTerminal("RESTORE", res)
 	}
 	return m, nil
 }
@@ -839,6 +903,7 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case pickRenew:
 			m.fMode = formRenewAccount
 			m.fTargetUsr = target
+			m.fBack = viewProtoMenu
 			m.fTitle = fmt.Sprintf("RENEW %s — %s", strings.ToUpper(string(m.proto)), target)
 			m.fFields = []formField{{Label: "Add Days     ", Value: "30", Numeric: true}}
 			m.fFocus = 0
@@ -849,6 +914,7 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case pickChangeIP:
 			m.fMode = formChangeIPLimit
 			m.fTargetUsr = target
+			m.fBack = viewProtoMenu
 			m.fTitle = fmt.Sprintf("EDIT IP LIMIT — %s", target)
 			m.fFields = []formField{{Label: "New IP Limit ", Value: "2", Numeric: true}}
 			m.fFocus = 0
@@ -859,6 +925,7 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case pickChangeQuota:
 			m.fMode = formChangeQuotaGB
 			m.fTargetUsr = target
+			m.fBack = viewProtoMenu
 			m.fTitle = fmt.Sprintf("EDIT QUOTA — %s", target)
 			m.fFields = []formField{{Label: "New Quota GB ", Value: "100", Numeric: true}}
 			m.fFocus = 0
@@ -1028,11 +1095,6 @@ func (m Model) View() string {
 		b.WriteString(fmt.Sprintf("  %s : %s\n", labelStyle.Render("Public Key "), warnStyle.Render(m.snap.SlowDNSPub)))
 		b.WriteString(fmt.Sprintf("  %s : %s\n", labelStyle.Render("UDP Port   "), textStyle.Render("53")))
 		b.WriteString(mainLine() + "\n")
-	} else if m.view == viewRollbackConfirm {
-		b.WriteString("\n  " + titleStyle.Render("CLASSIC MENU") + "\n")
-		b.WriteString(thinLine() + "\n")
-		b.WriteString(textStyle.Render("  Switch back to classic menu?") + "\n")
-		b.WriteString(mainLine() + "\n")
 	} else if m.view == viewProtoMenu {
 		pTitle := strings.ToUpper(string(m.proto))
 		b.WriteString(fmt.Sprintf("\n  %s  %s\n", titleStyle.Render(pTitle), mutedStyle.Render(fmt.Sprintf("%d accounts", len(m.currentAccounts())))))
@@ -1045,6 +1107,12 @@ func (m Model) View() string {
 		b.WriteString(thinLine() + "\n")
 	} else if m.view == viewServices {
 		b.WriteString("\n  " + titleStyle.Render("SERVICES") + "\n")
+		b.WriteString(thinLine() + "\n")
+	} else if m.view == viewAutoReboot {
+		b.WriteString("\n  " + titleStyle.Render("AUTO REBOOT") + "\n")
+		b.WriteString(thinLine() + "\n")
+	} else if m.view == viewAutokill {
+		b.WriteString("\n  " + titleStyle.Render("SSH AUTOKILL") + "\n")
 		b.WriteString(thinLine() + "\n")
 	}
 

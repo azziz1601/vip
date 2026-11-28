@@ -262,7 +262,7 @@ func AddXrayAccountToFile(configPath string, params XrayCreateParams) (uuid, exp
 	}
 	raw, err := os.ReadFile(configPath)
 	if err != nil {
-		return "", "", fmt.Errorf("gagal membaca %s: %w", configPath, err)
+		return "", "", fmt.Errorf("failed to read %s: %w", configPath, err)
 	}
 	content := string(raw)
 	marker := protoMarker(params.Proto)
@@ -273,7 +273,7 @@ func AddXrayAccountToFile(configPath string, params XrayCreateParams) (uuid, exp
 		if strings.HasPrefix(trimmed, marker+" ") {
 			f := strings.Fields(trimmed)
 			if len(f) >= 2 && f[1] == params.Username {
-				return "", "", fmt.Errorf("username '%s' sudah ada di %s", params.Username, params.Proto)
+				return "", "", fmt.Errorf("username %q already exists in %s", params.Username, params.Proto)
 			}
 		}
 	}
@@ -293,7 +293,7 @@ func AddXrayAccountToFile(configPath string, params XrayCreateParams) (uuid, exp
 	case ProtoTrojan:
 		clientLine = fmt.Sprintf(`},{"password": "%s","email": "%s"`, uuid, params.Username)
 	default:
-		return "", "", fmt.Errorf("protokol tidak didukung: %s", params.Proto)
+		return "", "", fmt.Errorf("unsupported protocol: %s", params.Proto)
 	}
 
 	block := fmt.Sprintf("%s %s %s\n%s", marker, params.Username, exp, clientLine)
@@ -306,7 +306,7 @@ func AddXrayAccountToFile(configPath string, params XrayCreateParams) (uuid, exp
 		}
 	}
 	if inserted == 0 {
-		return "", "", fmt.Errorf("marker inbound %s tidak ditemukan di %s", params.Proto, configPath)
+		return "", "", fmt.Errorf("inbound marker %s not found in %s", params.Proto, configPath)
 	}
 
 	// Validate config using xray -t if /usr/local/bin/xray exists and editing real config
@@ -318,7 +318,7 @@ func AddXrayAccountToFile(configPath string, params XrayCreateParams) (uuid, exp
 		defer os.Remove(tmpCheck)
 		if _, statErr := os.Stat("/usr/local/bin/xray"); statErr == nil {
 			if out, verr := exec.Command("/usr/local/bin/xray", "-t", "-config", tmpCheck).CombinedOutput(); verr != nil {
-				return "", "", fmt.Errorf("validasi xray -t gagal: %s", strings.TrimSpace(string(out)))
+				return "", "", fmt.Errorf("xray config validation failed: %s", strings.TrimSpace(string(out)))
 			}
 		}
 	}
@@ -382,7 +382,7 @@ func GetXrayAccountDetail(p Protocol, user string) (string, error) {
 		uuid, exp = lookupXrayFromConfig(XrayConfigPath, p, user)
 	}
 	if uuid == "" {
-		return "", fmt.Errorf("detail akun '%s' tidak ditemukan", user)
+		return "", fmt.Errorf("account %q not found", user)
 	}
 	links := BuildXrayLinks(p, domain, user, uuid)
 	return FormatXrayDetail(p, domain, user, uuid, exp, quotaGB, ipLimit, links), nil
@@ -476,7 +476,7 @@ func DeleteXrayAccount(p Protocol, user string) error {
 		return err
 	}
 	if !removed {
-		return fmt.Errorf("akun '%s' tidak ditemukan di config.json", user)
+		return fmt.Errorf("account %q not found", user)
 	}
 	_ = removeDBLine(protoDBPath(p), user)
 	_ = os.Remove(filepath.Join(protoQuotaDir(p), user))
@@ -517,7 +517,7 @@ func RenewXrayAccountInFile(configPath string, p Protocol, user string, addDays 
 		}
 	}
 	if !updated {
-		return "", fmt.Errorf("akun '%s' tidak ditemukan", user)
+		return "", fmt.Errorf("account %q not found", user)
 	}
 	if err := writeAtomic(configPath, []byte(strings.Join(lines, "\n")), 0644); err != nil {
 		return "", err
@@ -563,12 +563,12 @@ func CreateSSHAccount(params SSHCreateParams) (string, error) {
 	expHuman := expDate.Format("02 Jan, 2006")
 
 	if out, err := exec.Command("useradd", "-e", expISO, "-s", "/bin/false", "-M", params.Username).CombinedOutput(); err != nil {
-		return "", fmt.Errorf("useradd gagal: %s", strings.TrimSpace(string(out)))
+		return "", fmt.Errorf("useradd failed: %s", strings.TrimSpace(string(out)))
 	}
 	chp := exec.Command("chpasswd")
 	chp.Stdin = strings.NewReader(params.Username + ":" + params.Password + "\n")
 	if out, err := chp.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("chpasswd gagal: %s", strings.TrimSpace(string(out)))
+		return "", fmt.Errorf("chpasswd failed: %s", strings.TrimSpace(string(out)))
 	}
 
 	if params.IPLimit > 0 {
@@ -592,25 +592,25 @@ func FormatSSHDetail(user, pass string, ipLimit int, expHuman string) string {
 	pub := readFirstNonEmpty([]string{"/etc/slowdns/server.pub", "/root/slowdns/server.pub"}, "Not set")
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "◇━━━━━━━━━━━━━━━━━◇\n")
+	fmt.Fprintf(&b, "────────────────────────────────────────────────────\n")
 	fmt.Fprintf(&b, "  SSH ACCOUNT\n")
-	fmt.Fprintf(&b, "◇━━━━━━━━━━━━━━━━━◇\n")
+	fmt.Fprintf(&b, "────────────────────────────────────────────────────\n")
 	fmt.Fprintf(&b, "Host          : %s\n", domain)
 	fmt.Fprintf(&b, "IP VPS        : %s\n", ip)
 	fmt.Fprintf(&b, "Username      : %s\n", user)
 	fmt.Fprintf(&b, "Password      : %s\n", pass)
 	fmt.Fprintf(&b, "IP Limit      : %d\n", ipLimit)
 	fmt.Fprintf(&b, "Expired       : %s\n", expHuman)
-	fmt.Fprintf(&b, "◇━━━━━━━━━━━━━━━━━◇\n")
+	fmt.Fprintf(&b, "────────────────────────────────────────────────────\n")
 	fmt.Fprintf(&b, "SSH CUSTOM    : %s:80@%s:%s\n", domain, user, pass)
 	fmt.Fprintf(&b, "SSH SSL/TLS   : %s:443@%s:%s\n", domain, user, pass)
 	fmt.Fprintf(&b, "UDP CUSTOM    : %s:1-65535@%s:%s\n", domain, user, pass)
-	fmt.Fprintf(&b, "◇━━━━━━━━━━━━━━━━━◇\n")
+	fmt.Fprintf(&b, "────────────────────────────────────────────────────\n")
 	fmt.Fprintf(&b, "SLOWDNS\n")
 	fmt.Fprintf(&b, "Nameserver    : %s\n", ns)
 	fmt.Fprintf(&b, "Public Key    : %s\n", pub)
 	fmt.Fprintf(&b, "DNS Port      : 53\n")
-	fmt.Fprintf(&b, "◇━━━━━━━━━━━━━━━━━◇\n")
+	fmt.Fprintf(&b, "────────────────────────────────────────────────────\n")
 	return b.String()
 }
 
@@ -634,7 +634,7 @@ func GetSSHAccountDetail(user string) (string, error) {
 			return FormatSSHDetail(user, pass, ipLimit, exp), nil
 		}
 	}
-	return "", fmt.Errorf("detail akun SSH '%s' tidak ditemukan di .ssh.db", user)
+	return "", fmt.Errorf("SSH account %q not found", user)
 }
 
 func DeleteSSHAccount(user string) error {
@@ -653,7 +653,7 @@ func RenewSSHAccount(user string, addDays int) (string, error) {
 	expISO := expDate.Format("2006-01-02")
 	expHuman := expDate.Format("02 Jan, 2006")
 	if out, err := exec.Command("chage", "-E", expISO, user).CombinedOutput(); err != nil {
-		return "", fmt.Errorf("chage gagal: %s", strings.TrimSpace(string(out)))
+		return "", fmt.Errorf("chage failed: %s", strings.TrimSpace(string(out)))
 	}
 	// Update .ssh.db if present
 	b, err := os.ReadFile(SSHDBPath)
@@ -710,9 +710,9 @@ func CheckXrayLoginsFromLog(logPath string, users []string, p Protocol) string {
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "◇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◇\n")
+	fmt.Fprintf(&b, "────────────────────────────────────────────────────\n")
 	fmt.Fprintf(&b, "  %s ACTIVE LOGINS\n", strings.ToUpper(string(p)))
-	fmt.Fprintf(&b, "◇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◇\n")
+	fmt.Fprintf(&b, "────────────────────────────────────────────────────\n")
 	if len(activeIPs) == 0 {
 		b.WriteString("  No active sessions.\n")
 		return b.String()
@@ -746,7 +746,7 @@ var (
 	reSSHDAuth     = regexp.MustCompile(`sshd\[(\d+)\]:.*Accepted (?:password|publickey) for ([^\s]+) from ([^\s]+)`)
 )
 
-func livePIDsByComm() (dropbear map[string]bool, sshd map[string]bool) {
+func LivePIDsByComm() (dropbear map[string]bool, sshd map[string]bool) {
 	dropbear = make(map[string]bool)
 	sshd = make(map[string]bool)
 	entries, err := os.ReadDir("/proc")
@@ -802,7 +802,7 @@ func ParseSSHLoginsFromText(logText string, liveDB, liveSSH map[string]bool) (db
 }
 
 func CheckSSHLogins() string {
-	liveDB, liveSSH := livePIDsByComm()
+	liveDB, liveSSH := LivePIDsByComm()
 
 	var logBuf strings.Builder
 	for _, p := range []string{"/var/log/auth.log", "/var/log/secure"} {
@@ -960,7 +960,7 @@ func readFirstNonEmpty(paths []string, fallback string) string {
 
 func ChangeIPLimit(p Protocol, user string, newLimit int) error {
 	if newLimit < 0 {
-		return fmt.Errorf("limit IP tidak valid")
+		return fmt.Errorf("invalid IP limit")
 	}
 	if err := writeAtomic(filepath.Join(protoIPLimitDir(p), user), []byte(fmt.Sprintf("%d\n", newLimit)), 0644); err != nil {
 		return err
@@ -987,10 +987,10 @@ func ChangeIPLimit(p Protocol, user string, newLimit int) error {
 
 func ChangeQuotaGB(p Protocol, user string, newQuotaGB int) error {
 	if newQuotaGB < 0 {
-		return fmt.Errorf("quota GB tidak valid")
+		return fmt.Errorf("invalid quota value")
 	}
 	if p == ProtoSSH {
-		return fmt.Errorf("quota GB hanya untuk VMess/VLESS/Trojan")
+		return fmt.Errorf("quota is only available for VMess/VLESS/Trojan")
 	}
 	qPath := filepath.Join(protoQuotaDir(p), user)
 	if newQuotaGB == 0 {
@@ -1010,14 +1010,14 @@ func ChangeQuotaGB(p Protocol, user string, newQuotaGB int) error {
 
 func LockSSHAccount(user string) error {
 	if out, err := exec.Command("passwd", "-l", user).CombinedOutput(); err != nil {
-		return fmt.Errorf("passwd -l gagal: %s", strings.TrimSpace(string(out)))
+		return fmt.Errorf("lock failed: %s", strings.TrimSpace(string(out)))
 	}
 	return nil
 }
 
 func UnlockSSHAccount(user string) error {
 	if out, err := exec.Command("passwd", "-u", user).CombinedOutput(); err != nil {
-		return fmt.Errorf("passwd -u gagal: %s", strings.TrimSpace(string(out)))
+		return fmt.Errorf("unlock failed: %s", strings.TrimSpace(string(out)))
 	}
 	return nil
 }
@@ -1026,7 +1026,7 @@ func CleanExpiredSSH() string {
 	todayDays := time.Now().Unix() / 86400
 	raw, err := os.ReadFile("/etc/shadow")
 	if err != nil {
-		return "Gagal membaca /etc/shadow: " + err.Error()
+		return "failed to read /etc/shadow: " + err.Error()
 	}
 	var removed []string
 	for _, line := range strings.Split(string(raw), "\n") {
@@ -1083,7 +1083,7 @@ func LockXrayAccount(p Protocol, user string) error {
 		uuid, exp = lookupXrayFromConfig(XrayConfigPath, p, user)
 	}
 	if uuid == "" {
-		return fmt.Errorf("akun '%s' tidak ditemukan", user)
+		return fmt.Errorf("account %q not found", user)
 	}
 	if exp == "" {
 		exp = time.Now().AddDate(0, 0, 30).Format("2006-01-02")
@@ -1096,7 +1096,7 @@ func LockXrayAccount(p Protocol, user string) error {
 		return err
 	}
 	if !removed {
-		return fmt.Errorf("akun '%s' tidak ditemukan di config.json", user)
+		return fmt.Errorf("account %q not found", user)
 	}
 	reloadXray()
 	return nil
@@ -1106,11 +1106,11 @@ func UnlockXrayAccount(p Protocol, user string) error {
 	lockFile := filepath.Join(lockedDir(p), user)
 	b, err := os.ReadFile(lockFile)
 	if err != nil {
-		return fmt.Errorf("data lock untuk '%s' tidak ditemukan", user)
+		return fmt.Errorf("lock record for %q not found", user)
 	}
 	f := strings.Fields(string(b))
 	if len(f) < 2 {
-		return fmt.Errorf("format data lock '%s' rusak", user)
+		return fmt.Errorf("invalid lock record for %q", user)
 	}
 	uuid, exp := f[0], f[1]
 
@@ -1143,7 +1143,7 @@ func UnlockXrayAccount(p Protocol, user string) error {
 	defer os.Remove(tmpCheck)
 	if _, statErr := os.Stat("/usr/local/bin/xray"); statErr == nil {
 		if out, verr := exec.Command("/usr/local/bin/xray", "-t", "-config", tmpCheck).CombinedOutput(); verr != nil {
-			return fmt.Errorf("validasi xray -t gagal: %s", strings.TrimSpace(string(out)))
+			return fmt.Errorf("xray config validation failed: %s", strings.TrimSpace(string(out)))
 		}
 	}
 	if err := writeAtomic(XrayConfigPath, []byte(content), 0644); err != nil {
