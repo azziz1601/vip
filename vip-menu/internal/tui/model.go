@@ -289,11 +289,8 @@ func runQuickTrial() func(m *Model) tea.Cmd {
 			return nil
 		}
 		m.snap = sysinfo.Collect()
-		m.rTitle = "TRIAL " + strings.ToUpper(string(m.proto)) + " BERHASIL"
-		m.rBody = detail
-		m.rBack = viewProtoMenu
-		m.view = viewTextResult
-		return nil
+		m.view = viewProtoMenu
+		return showInTerminal("TRIAL "+strings.ToUpper(string(m.proto))+" BERHASIL", detail)
 	}
 }
 
@@ -317,31 +314,26 @@ func openPicker(act pickAction) func(m *Model) tea.Cmd {
 func runCheckLogins() func(m *Model) tea.Cmd {
 	return func(m *Model) tea.Cmd {
 		m.snap = sysinfo.Collect()
+		var body string
 		if m.proto == accounts.ProtoSSH {
-			m.rBody = accounts.CheckSSHLogins()
+			body = accounts.CheckSSHLogins()
 		} else {
 			accs := m.currentAccounts()
 			names := make([]string, 0, len(accs))
 			for _, a := range accs {
 				names = append(names, a.Username)
 			}
-			m.rBody = accounts.CheckXrayLoginsFromLog(accounts.XrayAccessLog, names, m.proto)
+			body = accounts.CheckXrayLoginsFromLog(accounts.XrayAccessLog, names, m.proto)
 		}
-		m.rTitle = "CEK LOGIN " + strings.ToUpper(string(m.proto))
-		m.rBack = viewProtoMenu
-		m.view = viewTextResult
-		return nil
+		return showInTerminal("CEK LOGIN "+strings.ToUpper(string(m.proto)), body)
 	}
 }
 
 func runMaintenance(title string, fn func() string) func(m *Model) tea.Cmd {
 	return func(m *Model) tea.Cmd {
-		m.rTitle = title
-		m.rBody = fn()
-		m.rBack = viewSystem
+		body := fn()
 		m.snap = sysinfo.Collect()
-		m.view = viewTextResult
-		return nil
+		return showInTerminal(title, body)
 	}
 }
 
@@ -381,6 +373,24 @@ func runRollback() func(m *Model) tea.Cmd {
 	return func(m *Model) tea.Cmd {
 		return func() tea.Msg { return rollbackDoneMsg{err: rollback.RollbackToLegacy()} }
 	}
+}
+
+// showInTerminal suspends Bubble Tea AltScreen and prints raw text to the normal terminal
+// so long vmess:// / vless:// / trojan:// links soft-wrap cleanly without truncation or broken newlines.
+func showInTerminal(title, body string) tea.Cmd {
+	f, err := os.CreateTemp("", "vip-out-*.txt")
+	if err != nil {
+		return nil
+	}
+	tmpPath := f.Name()
+	_, _ = fmt.Fprintf(f, "\033[1;33m%s\033[0m\n%s\n%s\n", title, strings.Repeat("─", 48), body)
+	_ = f.Close()
+
+	script := `clear; cat "$1"; rm -f "$1"; printf "\n\033[90mTekan Enter untuk kembali ke menu...\033[0m"; read -r _ || true`
+	cmd := exec.Command("bash", "-c", script, "_", tmpPath)
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		return execFinishedMsg{err: nil}
+	})
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -548,11 +558,9 @@ func (m Model) submitForm() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.snap = sysinfo.Collect()
-		m.rTitle = "AKUN SSH BERHASIL DIBUAT"
-		m.rBody = detail
-		m.rBack = viewProtoMenu
-		m.view = viewTextResult
-		return m, nil
+		m.view = viewProtoMenu
+		m.cursor = 0
+		return m, showInTerminal("AKUN SSH BERHASIL DIBUAT", detail)
 
 	case formCreateXray:
 		user := strings.TrimSpace(m.fFields[0].Value)
@@ -567,11 +575,9 @@ func (m Model) submitForm() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.snap = sysinfo.Collect()
-		m.rTitle = "AKUN " + strings.ToUpper(string(m.proto)) + " BERHASIL DIBUAT"
-		m.rBody = detail
-		m.rBack = viewProtoMenu
-		m.view = viewTextResult
-		return m, nil
+		m.view = viewProtoMenu
+		m.cursor = 0
+		return m, showInTerminal("AKUN "+strings.ToUpper(string(m.proto))+" BERHASIL DIBUAT", detail)
 
 	case formRenewAccount:
 		days, _ := strconv.Atoi(m.fFields[0].Value)
@@ -635,11 +641,9 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.view = viewProtoMenu
 				return m, nil
 			}
-			m.rTitle = "DETAIL AKUN " + strings.ToUpper(string(m.proto)) + " — " + target
-			m.rBody = detail
-			m.rBack = viewProtoMenu
-			m.view = viewTextResult
-			return m, nil
+			m.view = viewProtoMenu
+			m.cursor = 0
+			return m, showInTerminal("DETAIL AKUN "+strings.ToUpper(string(m.proto))+" — "+target, detail)
 
 		case pickRenew:
 			m.fMode = formRenewAccount
