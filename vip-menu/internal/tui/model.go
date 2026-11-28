@@ -90,6 +90,8 @@ type Model struct {
 
 	pAction pickAction
 	pUsers  []sysinfo.Account
+	pOffset int
+	pQuery  string
 
 	rTitle string
 	rBody  string
@@ -358,6 +360,8 @@ func openPicker(act pickAction) func(m *Model) tea.Cmd {
 		}
 		m.pAction = act
 		m.pUsers = list
+		m.pOffset = 0
+		m.pQuery = ""
 		m.cursor = 0
 		m.notice = ""
 		m.view = viewPickUser
@@ -466,6 +470,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		if m.view == viewPickUser {
+			m.syncPickerViewport(len(m.filteredPickerUsers()))
+		}
 		return m, nil
 
 	case execFinishedMsg:
@@ -693,32 +700,141 @@ func (m Model) submitForm() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) pickerVisibleRows() int {
+	// Reserve rows for top banner (3), title+search+rules (5), footer+status (3) = 11 rows
+	rows := m.height - 11
+	if m.height <= 0 {
+		rows = 15
+	}
+	if rows < 6 {
+		rows = 6
+	}
+	return rows
+}
+
+func (m Model) filteredPickerUsers() []sysinfo.Account {
+	if m.pQuery == "" {
+		return m.pUsers
+	}
+	q := strings.ToLower(m.pQuery)
+	out := make([]sysinfo.Account, 0, len(m.pUsers))
+	for _, u := range m.pUsers {
+		if strings.Contains(strings.ToLower(u.Username), q) {
+			out = append(out, u)
+		}
+	}
+	return out
+}
+
+func (m *Model) syncPickerViewport(total int) {
+	vis := m.pickerVisibleRows()
+	if total <= 0 {
+		m.cursor = 0
+		m.pOffset = 0
+		return
+	}
+	if m.cursor >= total {
+		m.cursor = total - 1
+	}
+	if m.cursor < 0 {
+		m.cursor = 0
+	}
+	if m.cursor < m.pOffset {
+		m.pOffset = m.cursor
+	} else if m.cursor >= m.pOffset+vis {
+		m.pOffset = m.cursor - vis + 1
+	}
+	maxOff := total - vis
+	if maxOff < 0 {
+		maxOff = 0
+	}
+	if m.pOffset > maxOff {
+		m.pOffset = maxOff
+	}
+	if m.pOffset < 0 {
+		m.pOffset = 0
+	}
+}
+
 func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	filtered := m.filteredPickerUsers()
+	total := len(filtered)
+	vis := m.pickerVisibleRows()
+
 	switch msg.String() {
 	case "ctrl+c":
 		return m, tea.Quit
-	case "esc", "backspace", "q":
+	case "esc":
+		if m.pQuery != "" {
+			m.pQuery = ""
+			m.cursor = 0
+			m.pOffset = 0
+			return m, nil
+		}
 		m.view = viewProtoMenu
 		m.cursor = 0
 		m.notice = ""
 		return m, nil
-	case "up", "k":
-		if m.cursor > 0 {
-			m.cursor--
-		} else if len(m.pUsers) > 0 {
-			m.cursor = len(m.pUsers) - 1
+	case "backspace":
+		if len(m.pQuery) > 0 {
+			m.pQuery = m.pQuery[:len(m.pQuery)-1]
+			m.cursor = 0
+			m.pOffset = 0
+			return m, nil
+		}
+		m.view = viewProtoMenu
+		m.cursor = 0
+		m.notice = ""
+		return m, nil
+	case "up":
+		if total > 0 {
+			if m.cursor > 0 {
+				m.cursor--
+			} else {
+				m.cursor = total - 1
+			}
+			m.syncPickerViewport(total)
 		}
 		return m, nil
-	case "down", "j":
-		if len(m.pUsers) > 0 {
-			m.cursor = (m.cursor + 1) % len(m.pUsers)
+	case "down":
+		if total > 0 {
+			m.cursor = (m.cursor + 1) % total
+			m.syncPickerViewport(total)
+		}
+		return m, nil
+	case "pgup":
+		if total > 0 {
+			m.cursor -= vis
+			if m.cursor < 0 {
+				m.cursor = 0
+			}
+			m.syncPickerViewport(total)
+		}
+		return m, nil
+	case "pgdown":
+		if total > 0 {
+			m.cursor += vis
+			if m.cursor >= total {
+				m.cursor = total - 1
+			}
+			m.syncPickerViewport(total)
+		}
+		return m, nil
+	case "home":
+		m.cursor = 0
+		m.syncPickerViewport(total)
+		return m, nil
+	case "end":
+		if total > 0 {
+			m.cursor = total - 1
+			m.syncPickerViewport(total)
 		}
 		return m, nil
 	case "enter":
-		if m.cursor < 0 || m.cursor >= len(m.pUsers) {
+		if m.cursor < 0 || m.cursor >= total {
 			return m, nil
 		}
-		target := m.pUsers[m.cursor].Username
+		target := filtered[m.cursor].Username
 		switch m.pAction {
 		case pickDetail:
 			var detail string
@@ -818,6 +934,20 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursor = 0
 			return m, nil
 		}
+	default:
+		if len(msg.Runes) > 0 {
+			changed := false
+			for _, r := range msg.Runes {
+				if r >= 32 && r <= 126 {
+					m.pQuery += string(r)
+					changed = true
+				}
+			}
+			if changed {
+				m.cursor = 0
+				m.pOffset = 0
+			}
+		}
 	}
 	return m, nil
 }
@@ -872,18 +1002,37 @@ func (m Model) View() string {
 		case pickUnlock:
 			actLabel = "UNLOCK AKUN — " + strings.ToUpper(string(m.proto))
 		}
+		filtered := m.filteredPickerUsers()
+		total := len(filtered)
+		vis := m.pickerVisibleRows()
+		m.syncPickerViewport(total)
+
 		b.WriteString("\n" + greenStyle.Bold(true).Render("  "+actLabel) + "\n")
-		b.WriteString(redLine() + "\n")
-		for i, a := range m.pUsers {
-			row := fmt.Sprintf(" %2d) %-18s  exp: %s", i+1, a.Username, a.Expired)
-			if i == m.cursor {
-				b.WriteString(selRowStyle.Width(panelWidth).Render("▸"+row) + "\n")
-			} else {
-				b.WriteString(greenStyle.Render(" "+row) + "\n")
-			}
+		if m.pQuery != "" {
+			b.WriteString(fmt.Sprintf("  %s %s\n", mutedStyle.Render("Cari:"), skyStyle.Render(m.pQuery+"█")))
+		} else {
+			b.WriteString(mutedStyle.Render("  Ketik nama untuk cari, atau ↑/↓ scroll") + "\n")
 		}
-		b.WriteString(blueLine() + "\n")
-		b.WriteString(mutedStyle.Render("  ↑/↓ Pilih • Enter Lanjut • Esc Kembali") + "\n")
+		b.WriteString(redLine() + "\n")
+		if total == 0 {
+			b.WriteString(amberStyle.Render("  Tidak ada akun yang cocok.") + "\n")
+		} else {
+			end := m.pOffset + vis
+			if end > total {
+				end = total
+			}
+			for i := m.pOffset; i < end; i++ {
+				a := filtered[i]
+				row := fmt.Sprintf(" %2d) %-18s  exp: %s", i+1, a.Username, a.Expired)
+				if i == m.cursor {
+					b.WriteString(selRowStyle.Width(panelWidth).Render("▸"+row) + "\n")
+				} else {
+					b.WriteString(greenStyle.Render(" "+row) + "\n")
+				}
+			}
+			b.WriteString(blueLine() + "\n")
+			b.WriteString(mutedStyle.Render(fmt.Sprintf("  Menampilkan %d-%d dari %d akun • PgUp/PgDn • Enter • Esc", m.pOffset+1, end, total)) + "\n")
+		}
 		return b.String()
 	}
 

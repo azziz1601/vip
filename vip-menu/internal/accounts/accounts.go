@@ -734,18 +734,135 @@ func CheckXrayLoginsFromLog(logPath string, users []string, p Protocol) string {
 	return b.String()
 }
 
-func CheckSSHLogins() string {
-	out, _ := exec.Command("bash", "-c", "who 2>/dev/null || true").Output()
-	var b strings.Builder
-	b.WriteString("◇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◇\n")
-	b.WriteString("  USER LOGIN SSH\n")
-	b.WriteString("◇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◇\n")
-	txt := strings.TrimSpace(string(out))
-	if txt == "" {
-		b.WriteString("  Tidak ada sesi SSH aktif (who).\n")
-	} else {
-		b.WriteString(txt + "\n")
+type SSHLoginSession struct {
+	PID      string
+	Username string
+	IP       string
+	Service  string
+}
+
+var (
+	reDropbearAuth = regexp.MustCompile(`dropbear\[(\d+)\]:.*Password auth succeeded for '([^']+)' from ([^\s]+)`)
+	reSSHDAuth     = regexp.MustCompile(`sshd\[(\d+)\]:.*Accepted (?:password|publickey) for ([^\s]+) from ([^\s]+)`)
+)
+
+func livePIDsByComm() (dropbear map[string]bool, sshd map[string]bool) {
+	dropbear = make(map[string]bool)
+	sshd = make(map[string]bool)
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return dropbear, sshd
 	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		pid := e.Name()
+		if len(pid) == 0 || pid[0] < '0' || pid[0] > '9' {
+			continue
+		}
+		commB, err := os.ReadFile(filepath.Join("/proc", pid, "comm"))
+		if err != nil {
+			continue
+		}
+		comm := strings.TrimSpace(string(commB))
+		switch comm {
+		case "dropbear":
+			dropbear[pid] = true
+		case "sshd":
+			sshd[pid] = true
+		}
+	}
+	return dropbear, sshd
+}
+
+// ParseSSHLoginsFromText matches currently active Dropbear & OpenSSH PIDs against auth logs.
+func ParseSSHLoginsFromText(logText string, liveDB, liveSSH map[string]bool) (dbSess, sshSess []SSHLoginSession) {
+	seenDB := make(map[string]bool)
+	seenSSH := make(map[string]bool)
+
+	for _, line := range strings.Split(logText, "\n") {
+		if m := reDropbearAuth.FindStringSubmatch(line); len(m) == 4 {
+			pid, user, ip := m[1], m[2], m[3]
+			if liveDB[pid] && !seenDB[pid] {
+				seenDB[pid] = true
+				dbSess = append(dbSess, SSHLoginSession{PID: pid, Username: user, IP: ip, Service: "Dropbear"})
+			}
+			continue
+		}
+		if m := reSSHDAuth.FindStringSubmatch(line); len(m) == 4 {
+			pid, user, ip := m[1], m[2], m[3]
+			if liveSSH[pid] && !seenSSH[pid] {
+				seenSSH[pid] = true
+				sshSess = append(sshSess, SSHLoginSession{PID: pid, Username: user, IP: ip, Service: "OpenSSH"})
+			}
+		}
+	}
+	return dbSess, sshSess
+}
+
+func CheckSSHLogins() string {
+	liveDB, liveSSH := livePIDsByComm()
+
+	var logBuf strings.Builder
+	for _, p := range []string{"/var/log/auth.log", "/var/log/secure"} {
+		if b, err := os.ReadFile(p); err == nil {
+			logBuf.Write(b)
+			logBuf.WriteByte('\n')
+		}
+	}
+	if jOut, err := exec.Command("journalctl", "-u", "dropbear", "-u", "ssh", "-u", "sshd", "--no-pager", "-n", "4000").Output(); err == nil {
+		logBuf.Write(jOut)
+		logBuf.WriteByte('\n')
+	}
+
+	dbSess, sshSess := ParseSSHLoginsFromText(logBuf.String(), liveDB, liveSSH)
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "DROPBEAR LOGIN (%d sesi aktif)\n", len(dbSess))
+	b.WriteString("────────────────────────────────────────────────────\n")
+	if len(dbSess) == 0 {
+		b.WriteString("  Tidak ada user Dropbear aktif.\n")
+	} else {
+		fmt.Fprintf(&b, "  %-7s %-16s %-6s %s\n", "PID", "Username", "Limit", "IP Address")
+		for _, s := range dbSess {
+			lim := readTrimmed(filepath.Join(protoIPLimitDir(ProtoSSH), s.Username), "-")
+			fmt.Fprintf(&b, "  %-7s %-16s %-6s %s\n", s.PID, s.Username, lim, s.IP)
+		}
+	}
+
+	fmt.Fprintf(&b, "\nOPENSSH LOGIN (%d sesi aktif)\n", len(sshSess))
+	b.WriteString("────────────────────────────────────────────────────\n")
+	if len(sshSess) == 0 {
+		b.WriteString("  Tidak ada user OpenSSH aktif.\n")
+	} else {
+		fmt.Fprintf(&b, "  %-7s %-16s %-6s %s\n", "PID", "Username", "Limit", "IP Address")
+		for _, s := range sshSess {
+			lim := readTrimmed(filepath.Join(protoIPLimitDir(ProtoSSH), s.Username), "-")
+			fmt.Fprintf(&b, "  %-7s %-16s %-6s %s\n", s.PID, s.Username, lim, s.IP)
+		}
+	}
+
+	// OpenVPN active clients if logs exist
+	var ovpnLines []string
+	for _, logPath := range []string{"/etc/openvpn/server/openvpn-tcp.log", "/etc/openvpn/server/openvpn-udp.log"} {
+		if raw, err := os.ReadFile(logPath); err == nil {
+			for _, line := range strings.Split(string(raw), "\n") {
+				if strings.HasPrefix(line, "CLIENT_LIST,") {
+					p := strings.Split(line, ",")
+					if len(p) >= 8 {
+						ovpnLines = append(ovpnLines, fmt.Sprintf("  %-16s %-20s %s", p[1], p[2], p[7]))
+					}
+				}
+			}
+		}
+	}
+	if len(ovpnLines) > 0 {
+		fmt.Fprintf(&b, "\nOPENVPN LOGIN (%d sesi aktif)\n", len(ovpnLines))
+		b.WriteString("────────────────────────────────────────────────────\n")
+		b.WriteString(strings.Join(ovpnLines, "\n") + "\n")
+	}
+
 	return b.String()
 }
 

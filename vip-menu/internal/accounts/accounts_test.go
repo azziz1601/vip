@@ -78,3 +78,16 @@ func TestCheckXrayLoginsExactMatch(t *testing.T) {
 		t.Fatalf("unexpected login output:\n%s", out)
 	}
 }
+
+func TestParseSSHLoginsMatchesLivePIDs(t *testing.T) {
+	logs := `Nov 28 11:45:01 localhost dropbear[1234]: Password auth succeeded for 'putra' from 127.0.0.1:51234
+Nov 28 11:45:02 localhost dropbear[9999]: Password auth succeeded for 'stale' from 127.0.0.1:51235
+Nov 28 11:46:00 localhost sshd[5678]: Accepted password for linda from 114.10.20.30 port 44321 ssh2`
+	db, ssh := ParseSSHLoginsFromText(logs, map[string]bool{"1234": true}, map[string]bool{"5678": true})
+	if len(db) != 1 || db[0].Username != "putra" || db[0].PID != "1234" {
+		t.Fatalf("unexpected dropbear sessions: %+v", db)
+	}
+	if len(ssh) != 1 || ssh[0].Username != "linda" || ssh[0].PID != "5678" {
+		t.Fatalf("unexpected sshd sessions: %+v", ssh)
+	}
+}
