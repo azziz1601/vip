@@ -23,6 +23,7 @@ const (
 	viewSystem
 	viewServices
 	viewSlowDNS
+	viewBackup
 	viewRollbackConfirm
 	viewForm
 	viewPickUser
@@ -35,6 +36,10 @@ const (
 	pickDetail pickAction = iota
 	pickRenew
 	pickDelete
+	pickChangeIP
+	pickChangeQuota
+	pickLock
+	pickUnlock
 )
 
 type formMode int
@@ -43,6 +48,8 @@ const (
 	formCreateSSH formMode = iota
 	formCreateXray
 	formRenewAccount
+	formChangeIPLimit
+	formChangeQuotaGB
 )
 
 type formField struct {
@@ -102,7 +109,6 @@ var (
 
 	panelWidth = 52
 
-	// No vertical walls anywhere so links & text copy cleanly on mobile SSH clients!
 	barBannerStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(colorGreen).
@@ -171,28 +177,64 @@ func (m Model) itemsForCurrentView() []menuItem {
 			{Key: "6", Label: "SERVICE CTRL", Run: goView(viewServices)},
 			{Key: "7", Label: "INFO SLOWDNS", Run: goView(viewSlowDNS)},
 			{Key: "8", Label: "UPDATE SCRIPT", Run: runUpdateScript()},
-			{Key: "9", Label: "BACKUP/RESTORE", Run: runExternal("menu-backup")},
+			{Key: "9", Label: "BACKUP/RESTORE", Run: goView(viewBackup)},
 			{Key: "0", Label: "ROLLBACK KLASIK", Run: goView(viewRollbackConfirm)},
 		}
 	case viewProtoMenu:
+		if m.proto == accounts.ProtoSSH {
+			return []menuItem{
+				{Key: "1", Label: "Buat Akun SSH & SlowDNS", Run: startCreateForm()},
+				{Key: "2", Label: "Trial SSH (1 Hari)", Run: runQuickTrial()},
+				{Key: "3", Label: "Perpanjang SSH", Run: openPicker(pickRenew)},
+				{Key: "4", Label: "Cek User Login SSH", Run: runCheckLogins()},
+				{Key: "5", Label: "Daftar Member SSH", Run: runListMembers()},
+				{Key: "6", Label: "Hapus Akun SSH", Run: openPicker(pickDelete)},
+				{Key: "7", Label: "Hapus User Expired SSH", Run: runMaintenance("HAPUS EXPIRED SSH", accounts.CleanExpiredSSH, viewProtoMenu)},
+				{Key: "8", Label: "Ubah Limit IP SSH", Run: openPicker(pickChangeIP)},
+				{Key: "9", Label: "Lock Akun SSH", Run: openPicker(pickLock)},
+				{Key: "a", Label: "Unlock Akun SSH", Run: openPicker(pickUnlock)},
+				{Key: "b", Label: "Detail Config SSH (+ SlowDNS)", Run: openPicker(pickDetail)},
+				{Key: "c", Label: "Autokill SSH", Run: runExternal("autokill")},
+				{Key: "d", Label: "Cek Multi Login SSH", Run: runExternal("ceklim")},
+				{Key: "0", Label: "Kembali ke Menu Utama", Run: goView(viewDashboard)},
+			}
+		}
 		pName := strings.ToUpper(string(m.proto))
 		return []menuItem{
 			{Key: "1", Label: "Buat Akun " + pName, Run: startCreateForm()},
 			{Key: "2", Label: "Trial " + pName + " (1 Hari)", Run: runQuickTrial()},
-			{Key: "3", Label: "Perpanjang " + pName, Run: openPicker(pickRenew)},
-			{Key: "4", Label: "Hapus " + pName, Run: openPicker(pickDelete)},
+			{Key: "3", Label: "Hapus Akun " + pName, Run: openPicker(pickDelete)},
+			{Key: "4", Label: "Perpanjang " + pName, Run: openPicker(pickRenew)},
 			{Key: "5", Label: "Cek User Login " + pName, Run: runCheckLogins()},
-			{Key: "6", Label: "Lihat Detail / Link " + pName, Run: openPicker(pickDetail)},
+			{Key: "6", Label: "Lihat Detail / 7 Link " + pName, Run: openPicker(pickDetail)},
+			{Key: "7", Label: "Ubah Limit IP " + pName, Run: openPicker(pickChangeIP)},
+			{Key: "8", Label: "Ubah Limit Quota (GB) " + pName, Run: openPicker(pickChangeQuota)},
+			{Key: "9", Label: "Daftar Member " + pName, Run: runListMembers()},
+			{Key: "a", Label: "Lock Akun " + pName, Run: openPicker(pickLock)},
+			{Key: "b", Label: "Unlock Akun " + pName, Run: openPicker(pickUnlock)},
 			{Key: "0", Label: "Kembali ke Menu Utama", Run: goView(viewDashboard)},
 		}
 	case viewSystem:
 		return []menuItem{
-			{Key: "1", Label: "Hapus Akun Expired (XP)", Run: runMaintenance("CLEAN EXPIRED", accounts.CleanExpiredXray)},
-			{Key: "2", Label: "Clear Cache & Log", Run: runMaintenance("CLEAR CACHE & LOG", accounts.ClearCacheAndLogs)},
+			{Key: "1", Label: "Hapus Semua Akun Expired", Run: runMaintenance("CLEAN EXPIRED", accounts.CleanAllExpired, viewSystem)},
+			{Key: "2", Label: "Clear Cache & Log", Run: runMaintenance("CLEAR CACHE & LOG", accounts.ClearCacheAndLogs, viewSystem)},
 			{Key: "3", Label: "Monitor Bandwidth (vnstat)", Run: runExternal("bw")},
 			{Key: "4", Label: "Speedtest VPS", Run: runExternal("speedtest")},
 			{Key: "5", Label: "Limit Speed", Run: runExternal("limitspeed")},
-			{Key: "6", Label: "Utility & Pengaturan Lainnya", Run: runExternal("utility")},
+			{Key: "6", Label: "Ganti Domain (addhost)", Run: runExternal("addhost")},
+			{Key: "7", Label: "Perbarui Cert SSL (fixcert)", Run: runExternal("fixcert")},
+			{Key: "8", Label: "Atur Auto Reboot", Run: runExternal("autoreboot")},
+			{Key: "9", Label: "Kelola Bot Telegram", Run: runExternal("mbot")},
+			{Key: "a", Label: "Add Bot Notifikasi", Run: runExternal("add-bot-notif")},
+			{Key: "b", Label: "Info Port VPS", Run: runExternal("prot")},
+			{Key: "c", Label: "Menu Utility Lengkap", Run: runExternal("utility")},
+			{Key: "0", Label: "Kembali ke Menu Utama", Run: goView(viewDashboard)},
+		}
+	case viewBackup:
+		return []menuItem{
+			{Key: "1", Label: "Backup VPS Data", Run: runExternal("backup")},
+			{Key: "2", Label: "Restore VPS Data", Run: runExternal("restore")},
+			{Key: "3", Label: "AutoBackup VPS Data", Run: runExternal("autobackup")},
 			{Key: "0", Label: "Kembali ke Menu Utama", Run: goView(viewDashboard)},
 		}
 	case viewServices:
@@ -297,17 +339,44 @@ func runQuickTrial() func(m *Model) tea.Cmd {
 func openPicker(act pickAction) func(m *Model) tea.Cmd {
 	return func(m *Model) tea.Cmd {
 		m.snap = sysinfo.Collect()
-		accs := m.currentAccounts()
-		if len(accs) == 0 {
-			m.notice = amberStyle.Render("Belum ada akun " + strings.ToUpper(string(m.proto)))
+		var list []sysinfo.Account
+		if act == pickUnlock && m.proto != accounts.ProtoSSH {
+			locked := accounts.ListLockedXrayUsers(m.proto)
+			for _, u := range locked {
+				list = append(list, sysinfo.Account{Username: u, Expired: "LOCKED", Protocol: string(m.proto)})
+			}
+		} else {
+			list = m.currentAccounts()
+		}
+		if len(list) == 0 {
+			if act == pickUnlock && m.proto != accounts.ProtoSSH {
+				m.notice = amberStyle.Render("Tidak ada akun terkunci di " + strings.ToUpper(string(m.proto)))
+			} else {
+				m.notice = amberStyle.Render("Belum ada akun " + strings.ToUpper(string(m.proto)))
+			}
 			return nil
 		}
 		m.pAction = act
-		m.pUsers = accs
+		m.pUsers = list
 		m.cursor = 0
 		m.notice = ""
 		m.view = viewPickUser
 		return nil
+	}
+}
+
+func runListMembers() func(m *Model) tea.Cmd {
+	return func(m *Model) tea.Cmd {
+		m.snap = sysinfo.Collect()
+		accs := m.currentAccounts()
+		names := make([]string, 0, len(accs))
+		exps := make(map[string]string, len(accs))
+		for _, a := range accs {
+			names = append(names, a.Username)
+			exps[a.Username] = a.Expired
+		}
+		body := accounts.ListMembers(m.proto, names, exps)
+		return showInTerminal("DAFTAR MEMBER "+strings.ToUpper(string(m.proto)), body)
 	}
 }
 
@@ -329,10 +398,11 @@ func runCheckLogins() func(m *Model) tea.Cmd {
 	}
 }
 
-func runMaintenance(title string, fn func() string) func(m *Model) tea.Cmd {
+func runMaintenance(title string, fn func() string, back viewID) func(m *Model) tea.Cmd {
 	return func(m *Model) tea.Cmd {
 		body := fn()
 		m.snap = sysinfo.Collect()
+		m.view = back
 		return showInTerminal(title, body)
 	}
 }
@@ -375,8 +445,6 @@ func runRollback() func(m *Model) tea.Cmd {
 	}
 }
 
-// showInTerminal suspends Bubble Tea AltScreen and prints raw text to the normal terminal
-// so long vmess:// / vless:// / trojan:// links soft-wrap cleanly without truncation or broken newlines.
 func showInTerminal(title, body string) tea.Cmd {
 	f, err := os.CreateTemp("", "vip-out-*.txt")
 	if err != nil {
@@ -405,7 +473,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.notice = errStyle.Render("Error: " + msg.err.Error())
 		} else {
-			m.notice = greenStyle.Render("Selesai")
+			m.notice = ""
 		}
 		return m, nil
 
@@ -597,6 +665,30 @@ func (m Model) submitForm() (tea.Model, tea.Cmd) {
 		m.view = viewProtoMenu
 		m.cursor = 0
 		return m, nil
+
+	case formChangeIPLimit:
+		newLim, _ := strconv.Atoi(m.fFields[0].Value)
+		if err := accounts.ChangeIPLimit(m.proto, m.fTargetUsr, newLim); err != nil {
+			m.notice = errStyle.Render(err.Error())
+			return m, nil
+		}
+		m.snap = sysinfo.Collect()
+		m.notice = greenStyle.Render(fmt.Sprintf("Limit IP '%s' diubah ke %d IP", m.fTargetUsr, newLim))
+		m.view = viewProtoMenu
+		m.cursor = 0
+		return m, nil
+
+	case formChangeQuotaGB:
+		newQ, _ := strconv.Atoi(m.fFields[0].Value)
+		if err := accounts.ChangeQuotaGB(m.proto, m.fTargetUsr, newQ); err != nil {
+			m.notice = errStyle.Render(err.Error())
+			return m, nil
+		}
+		m.snap = sysinfo.Collect()
+		m.notice = greenStyle.Render(fmt.Sprintf("Quota '%s' diubah ke %d GB", m.fTargetUsr, newQ))
+		m.view = viewProtoMenu
+		m.cursor = 0
+		return m, nil
 	}
 	return m, nil
 }
@@ -655,6 +747,60 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.view = viewForm
 			return m, nil
 
+		case pickChangeIP:
+			m.fMode = formChangeIPLimit
+			m.fTargetUsr = target
+			m.fTitle = fmt.Sprintf("UBAH LIMIT IP %s — %s", strings.ToUpper(string(m.proto)), target)
+			m.fFields = []formField{{Label: "Limit IP Baru ", Value: "2", Numeric: true}}
+			m.fFocus = 0
+			m.notice = ""
+			m.view = viewForm
+			return m, nil
+
+		case pickChangeQuota:
+			m.fMode = formChangeQuotaGB
+			m.fTargetUsr = target
+			m.fTitle = fmt.Sprintf("UBAH QUOTA %s — %s", strings.ToUpper(string(m.proto)), target)
+			m.fFields = []formField{{Label: "Quota Baru (GB)", Value: "100", Numeric: true}}
+			m.fFocus = 0
+			m.notice = ""
+			m.view = viewForm
+			return m, nil
+
+		case pickLock:
+			var err error
+			if m.proto == accounts.ProtoSSH {
+				err = accounts.LockSSHAccount(target)
+			} else {
+				err = accounts.LockXrayAccount(m.proto, target)
+			}
+			if err != nil {
+				m.notice = errStyle.Render("Gagal lock: " + err.Error())
+			} else {
+				m.notice = greenStyle.Render(fmt.Sprintf("Akun '%s' berhasil dikunci", target))
+			}
+			m.snap = sysinfo.Collect()
+			m.view = viewProtoMenu
+			m.cursor = 0
+			return m, nil
+
+		case pickUnlock:
+			var err error
+			if m.proto == accounts.ProtoSSH {
+				err = accounts.UnlockSSHAccount(target)
+			} else {
+				err = accounts.UnlockXrayAccount(m.proto, target)
+			}
+			if err != nil {
+				m.notice = errStyle.Render("Gagal unlock: " + err.Error())
+			} else {
+				m.notice = greenStyle.Render(fmt.Sprintf("Akun '%s' berhasil dibuka kembali", target))
+			}
+			m.snap = sysinfo.Collect()
+			m.view = viewProtoMenu
+			m.cursor = 0
+			return m, nil
+
 		case pickDelete:
 			var err error
 			if m.proto == accounts.ProtoSSH {
@@ -679,23 +825,12 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) View() string {
 	var b strings.Builder
 
-	// Top banner: horizontal blue lines + red accent bar (NO vertical borders!)
 	b.WriteString(blueLine() + "\n")
 	b.WriteString(barBannerStyle.Render(fmt.Sprintf("ZE-VPN TUNNELING  •  v%s", m.version)) + "\n")
 	b.WriteString(blueLine() + "\n")
 
 	if m.view == viewDashboard {
 		b.WriteString(m.renderDashboard())
-		return b.String()
-	}
-
-	// Result viewer: ZERO vertical borders so long-press copy on mobile never captures box lines!
-	if m.view == viewTextResult {
-		b.WriteString("\n" + amberStyle.Render(m.rTitle) + "\n")
-		b.WriteString(redLine() + "\n")
-		b.WriteString(m.rBody + "\n")
-		b.WriteString(blueLine() + "\n")
-		b.WriteString(mutedStyle.Render("Tekan Enter / Esc untuk kembali...") + "\n")
 		return b.String()
 	}
 
@@ -728,6 +863,14 @@ func (m Model) View() string {
 			actLabel = "PERPANJANG — " + strings.ToUpper(string(m.proto))
 		case pickDelete:
 			actLabel = "HAPUS AKUN — " + strings.ToUpper(string(m.proto))
+		case pickChangeIP:
+			actLabel = "UBAH LIMIT IP — " + strings.ToUpper(string(m.proto))
+		case pickChangeQuota:
+			actLabel = "UBAH QUOTA GB — " + strings.ToUpper(string(m.proto))
+		case pickLock:
+			actLabel = "LOCK AKUN — " + strings.ToUpper(string(m.proto))
+		case pickUnlock:
+			actLabel = "UNLOCK AKUN — " + strings.ToUpper(string(m.proto))
 		}
 		b.WriteString("\n" + greenStyle.Bold(true).Render("  "+actLabel) + "\n")
 		b.WriteString(redLine() + "\n")
@@ -744,7 +887,6 @@ func (m Model) View() string {
 		return b.String()
 	}
 
-	// Sub-menus (zero vertical walls)
 	if m.view == viewSlowDNS {
 		b.WriteString("\n" + greenStyle.Bold(true).Render("  KONFIGURASI SLOWDNS (HTTP CUSTOM)") + "\n")
 		b.WriteString(redLine() + "\n")
@@ -762,6 +904,15 @@ func (m Model) View() string {
 	} else if m.view == viewProtoMenu {
 		pTitle := strings.ToUpper(string(m.proto))
 		b.WriteString(fmt.Sprintf("\n  %s  (%s akun)\n", greenStyle.Bold(true).Render("MENU "+pTitle), amberStyle.Render(fmt.Sprintf("%d", len(m.currentAccounts())))))
+		b.WriteString(redLine() + "\n")
+	} else if m.view == viewBackup {
+		b.WriteString("\n" + greenStyle.Bold(true).Render("  BACKUP & RESTORE VPS") + "\n")
+		b.WriteString(redLine() + "\n")
+	} else if m.view == viewSystem {
+		b.WriteString("\n" + greenStyle.Bold(true).Render("  MENU SYSTEM & UTILITY") + "\n")
+		b.WriteString(redLine() + "\n")
+	} else if m.view == viewServices {
+		b.WriteString("\n" + greenStyle.Bold(true).Render("  SERVICE CONTROL") + "\n")
 		b.WriteString(redLine() + "\n")
 	}
 
@@ -785,7 +936,6 @@ func (m Model) View() string {
 func (m Model) renderDashboard() string {
 	var b strings.Builder
 
-	// 1. System Info + Monthly/Daily Bandwidth (clean borderless right/left walls, red dividers)
 	b.WriteString(fmt.Sprintf("  %s : %s\n", greenStyle.Render("OS     "), greenStyle.Render(m.snap.OSName)))
 	b.WriteString(fmt.Sprintf("  %s : %s\n", greenStyle.Render("RAM    "), greenStyle.Render(fmt.Sprintf("%dM / %dM (%d%%)", m.snap.MemUsedMB, m.snap.MemTotalMB, m.snap.MemPercent))))
 	b.WriteString(fmt.Sprintf("  %s : %s\n", greenStyle.Render("SWAP   "), greenStyle.Render(fmt.Sprintf("%dM", m.snap.SwapTotalMB))))
@@ -805,7 +955,6 @@ func (m Model) renderDashboard() string {
 	b.WriteString(fmt.Sprintf("  %s : %s\n", greenStyle.Render("TRAFFIC"), greenStyle.Render(m.snap.BW.TrafficRate)))
 	b.WriteString(blueLine() + "\n")
 
-	// 2. Compact Service Status Row (XRAY : ON | SSH-WS : ON | LOADBLC : ON | SLOWDNS : ON)
 	svcBadge := func(name string) string {
 		for _, s := range m.snap.Services {
 			if s.Name == name {
@@ -825,7 +974,6 @@ func (m Model) renderDashboard() string {
 	))
 	b.WriteString(blueLine() + "\n")
 
-	// 3. LIST ACCOUNTS section (matching screenshot style)
 	b.WriteString(lipgloss.NewStyle().Width(panelWidth).Align(lipgloss.Center).Foreground(colorGreen).Render("LIST ACCOUNTS") + "\n")
 	b.WriteString(redLine() + "\n")
 	b.WriteString(fmt.Sprintf("    %s : %-4s %s\n", greenStyle.Render("SSH/OPENVPN"), amberStyle.Render(fmt.Sprintf("%d", len(m.snap.SSHAccounts))), greenStyle.Render("ACCOUNT")))
@@ -838,7 +986,6 @@ func (m Model) renderDashboard() string {
 		b.WriteString("  " + m.notice + "\n")
 	}
 
-	// 4. Clean 2-Column Menu (NO vertical divider lines!)
 	items := m.itemsForCurrentView()
 	half := (len(items) + 1) / 2
 	for i := 0; i < half; i++ {

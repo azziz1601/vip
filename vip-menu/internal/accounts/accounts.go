@@ -838,3 +838,236 @@ func readFirstNonEmpty(paths []string, fallback string) string {
 	}
 	return fallback
 }
+
+// ---------- Extended Account Management (IP Limit, Quota, Lock/Unlock, Members, SSH Expiry) ----------
+
+func ChangeIPLimit(p Protocol, user string, newLimit int) error {
+	if newLimit < 0 {
+		return fmt.Errorf("limit IP tidak valid")
+	}
+	if err := writeAtomic(filepath.Join(protoIPLimitDir(p), user), []byte(fmt.Sprintf("%d\n", newLimit)), 0644); err != nil {
+		return err
+	}
+	if p == ProtoSSH {
+		if raw, err := os.ReadFile(SSHDBPath); err == nil {
+			for _, line := range strings.Split(string(raw), "\n") {
+				f := strings.Fields(line)
+				if len(f) >= 6 && f[0] == "#ssh#" && f[1] == user {
+					exp := strings.Join(f[5:], " ")
+					_ = upsertDBLine(SSHDBPath, user, fmt.Sprintf("#ssh# %s %s %s %d %s", user, f[2], f[3], newLimit, exp))
+					break
+				}
+			}
+		}
+	} else {
+		uuid, exp, quotaGB, _ := lookupXrayDB(p, user)
+		if uuid != "" {
+			_ = upsertDBLine(protoDBPath(p), user, fmt.Sprintf("### %s %s %s %d %d", user, exp, uuid, quotaGB, newLimit))
+		}
+	}
+	return nil
+}
+
+func ChangeQuotaGB(p Protocol, user string, newQuotaGB int) error {
+	if newQuotaGB < 0 {
+		return fmt.Errorf("quota GB tidak valid")
+	}
+	if p == ProtoSSH {
+		return fmt.Errorf("quota GB hanya untuk VMess/VLESS/Trojan")
+	}
+	qPath := filepath.Join(protoQuotaDir(p), user)
+	if newQuotaGB == 0 {
+		_ = os.Remove(qPath)
+	} else {
+		bytesVal := int64(newQuotaGB) * 1024 * 1024 * 1024
+		if err := writeAtomic(qPath, []byte(fmt.Sprintf("%d\n", bytesVal)), 0644); err != nil {
+			return err
+		}
+	}
+	uuid, exp, _, ipLimit := lookupXrayDB(p, user)
+	if uuid != "" {
+		_ = upsertDBLine(protoDBPath(p), user, fmt.Sprintf("### %s %s %s %d %d", user, exp, uuid, newQuotaGB, ipLimit))
+	}
+	return nil
+}
+
+func LockSSHAccount(user string) error {
+	if out, err := exec.Command("passwd", "-l", user).CombinedOutput(); err != nil {
+		return fmt.Errorf("passwd -l gagal: %s", strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func UnlockSSHAccount(user string) error {
+	if out, err := exec.Command("passwd", "-u", user).CombinedOutput(); err != nil {
+		return fmt.Errorf("passwd -u gagal: %s", strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func CleanExpiredSSH() string {
+	todayDays := time.Now().Unix() / 86400
+	raw, err := os.ReadFile("/etc/shadow")
+	if err != nil {
+		return "Gagal membaca /etc/shadow: " + err.Error()
+	}
+	var removed []string
+	for _, line := range strings.Split(string(raw), "\n") {
+		parts := strings.Split(line, ":")
+		if len(parts) < 8 || parts[7] == "" {
+			continue
+		}
+		user := parts[0]
+		if user == "root" || user == "" {
+			continue
+		}
+		expDays, err := strconv.ParseInt(parts[7], 10, 64)
+		if err != nil || expDays <= 0 {
+			continue
+		}
+		if expDays < todayDays {
+			if err := DeleteSSHAccount(user); err == nil {
+				removed = append(removed, user)
+			}
+		}
+	}
+	if len(removed) == 0 {
+		return "Tidak ada akun SSH yang expired hari ini."
+	}
+	return "Akun SSH expired dihapus:\n- " + strings.Join(removed, "\n- ")
+}
+
+func CleanAllExpired() string {
+	return CleanExpiredSSH() + "\n\n" + CleanExpiredXray()
+}
+
+func lockedDir(p Protocol) string {
+	return filepath.Join(protoQuotaDir(p), ".locked")
+}
+
+func ListLockedXrayUsers(p Protocol) []string {
+	entries, err := os.ReadDir(lockedDir(p))
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			out = append(out, e.Name())
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func LockXrayAccount(p Protocol, user string) error {
+	uuid, exp, _, _ := lookupXrayDB(p, user)
+	if uuid == "" {
+		uuid, exp = lookupXrayFromConfig(XrayConfigPath, p, user)
+	}
+	if uuid == "" {
+		return fmt.Errorf("akun '%s' tidak ditemukan", user)
+	}
+	if exp == "" {
+		exp = time.Now().AddDate(0, 0, 30).Format("2006-01-02")
+	}
+	if err := writeAtomic(filepath.Join(lockedDir(p), user), []byte(fmt.Sprintf("%s %s\n", uuid, exp)), 0600); err != nil {
+		return err
+	}
+	removed, err := DeleteXrayAccountFromFile(XrayConfigPath, p, user)
+	if err != nil {
+		return err
+	}
+	if !removed {
+		return fmt.Errorf("akun '%s' tidak ditemukan di config.json", user)
+	}
+	reloadXray()
+	return nil
+}
+
+func UnlockXrayAccount(p Protocol, user string) error {
+	lockFile := filepath.Join(lockedDir(p), user)
+	b, err := os.ReadFile(lockFile)
+	if err != nil {
+		return fmt.Errorf("data lock untuk '%s' tidak ditemukan", user)
+	}
+	f := strings.Fields(string(b))
+	if len(f) < 2 {
+		return fmt.Errorf("format data lock '%s' rusak", user)
+	}
+	uuid, exp := f[0], f[1]
+
+	raw, err := os.ReadFile(XrayConfigPath)
+	if err != nil {
+		return err
+	}
+	content := string(raw)
+	marker := protoMarker(p)
+	var clientLine string
+	switch p {
+	case ProtoVMess:
+		clientLine = fmt.Sprintf(`},{"id": "%s","alterId": 0,"email": "%s"`, uuid, user)
+	case ProtoVLESS:
+		clientLine = fmt.Sprintf(`},{"id": "%s","email": "%s"`, uuid, user)
+	case ProtoTrojan:
+		clientLine = fmt.Sprintf(`},{"password": "%s","email": "%s"`, uuid, user)
+	}
+	block := fmt.Sprintf("%s %s %s\n%s", marker, user, exp, clientLine)
+	for _, mk := range protoInboundMarkers(p) {
+		target := mk + "\n"
+		if strings.Contains(content, target) {
+			content = strings.Replace(content, target, mk+"\n"+block+"\n", 1)
+		}
+	}
+	tmpCheck := fmt.Sprintf("/tmp/xray-unlock-%d.json", time.Now().UnixNano())
+	if err := os.WriteFile(tmpCheck, []byte(content), 0644); err != nil {
+		return err
+	}
+	defer os.Remove(tmpCheck)
+	if _, statErr := os.Stat("/usr/local/bin/xray"); statErr == nil {
+		if out, verr := exec.Command("/usr/local/bin/xray", "-t", "-config", tmpCheck).CombinedOutput(); verr != nil {
+			return fmt.Errorf("validasi xray -t gagal: %s", strings.TrimSpace(string(out)))
+		}
+	}
+	if err := writeAtomic(XrayConfigPath, []byte(content), 0644); err != nil {
+		return err
+	}
+	_ = os.Remove(lockFile)
+	reloadXray()
+	return nil
+}
+
+func ListMembers(p Protocol, users []string, exps map[string]string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "DAFTAR MEMBER %s (%d akun)\n", strings.ToUpper(string(p)), len(users))
+	b.WriteString("────────────────────────────────────────────────────\n")
+	if len(users) == 0 {
+		b.WriteString("Belum ada akun.\n")
+		return b.String()
+	}
+	if p == ProtoSSH {
+		fmt.Fprintf(&b, "%-3s %-16s %-8s %-14s\n", "No", "Username", "LimitIP", "Expired")
+		b.WriteString("────────────────────────────────────────────────────\n")
+		for i, u := range users {
+			lim := readTrimmed(filepath.Join(protoIPLimitDir(p), u), "-")
+			fmt.Fprintf(&b, "%-3d %-16s %-8s %-14s\n", i+1, u, lim, exps[u])
+		}
+		return b.String()
+	}
+	fmt.Fprintf(&b, "%-3s %-15s %-6s %-8s %-12s\n", "No", "Username", "LimIP", "Quota", "Expired")
+	b.WriteString("────────────────────────────────────────────────────\n")
+	for i, u := range users {
+		lim := readTrimmed(filepath.Join(protoIPLimitDir(p), u), "-")
+		qStr := "Unlim"
+		if qb := readTrimmed(filepath.Join(protoQuotaDir(p), u), ""); qb != "" {
+			if n, err := strconv.ParseInt(qb, 10, 64); err == nil && n > 0 {
+				qStr = fmt.Sprintf("%dGB", n/(1024*1024*1024))
+			}
+		}
+		fmt.Fprintf(&b, "%-3d %-15s %-6s %-8s %-12s\n", i+1, u, lim, qStr, exps[u])
+	}
+	if locked := ListLockedXrayUsers(p); len(locked) > 0 {
+		b.WriteString("\nAkun terkunci (locked): " + strings.Join(locked, ", ") + "\n")
+	}
+	return b.String()
+}
