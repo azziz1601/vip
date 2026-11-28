@@ -38,7 +38,7 @@ var validUserRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,32}$`)
 
 func ValidateUsername(u string) error {
 	if !validUserRe.MatchString(u) {
-		return fmt.Errorf("username hanya boleh huruf, angka, '-', '_' (maks 32 karakter)")
+		return fmt.Errorf("invalid username: use letters, numbers, -, _")
 	}
 	return nil
 }
@@ -361,17 +361,17 @@ func FormatXrayDetail(p Protocol, domain, user, uuid, exp string, quotaGB, ipLim
 	fmt.Fprintf(&b, "Domain   : %s\n", domain)
 	fmt.Fprintf(&b, "User ID  : %s\n", uuid)
 	fmt.Fprintf(&b, "Expired  : %s\n", exp)
-	fmt.Fprintf(&b, "Limit IP : %d IP  |  Quota: %d GB\n", ipLimit, quotaGB)
+	fmt.Fprintf(&b, "IP Limit : %d  |  Quota : %d GB\n", ipLimit, quotaGB)
 	fmt.Fprintf(&b, "────────────────────────────────────────────────────\n")
-	fmt.Fprintf(&b, "WS TLS (443) :\n%s\n\n", l.WSTLS)
-	fmt.Fprintf(&b, "WS Non-TLS (80) :\n%s\n\n", l.WSNTLS)
-	fmt.Fprintf(&b, "HTTPUpgrade TLS (443) :\n%s\n\n", l.HUTLS)
-	fmt.Fprintf(&b, "HTTPUpgrade Non-TLS (80) :\n%s\n\n", l.HUNTLS)
-	fmt.Fprintf(&b, "XHTTP TLS (443) :\n%s\n\n", l.XHTTPTLS)
-	fmt.Fprintf(&b, "XHTTP Non-TLS (80) :\n%s\n\n", l.XHTTPNTLS)
-	fmt.Fprintf(&b, "gRPC TLS (443) :\n%s\n", l.GRPC)
+	fmt.Fprintf(&b, "WS TLS :\n%s\n\n", l.WSTLS)
+	fmt.Fprintf(&b, "WS Non-TLS :\n%s\n\n", l.WSNTLS)
+	fmt.Fprintf(&b, "HTTPUpgrade TLS :\n%s\n\n", l.HUTLS)
+	fmt.Fprintf(&b, "HTTPUpgrade Non-TLS :\n%s\n\n", l.HUNTLS)
+	fmt.Fprintf(&b, "XHTTP TLS :\n%s\n\n", l.XHTTPTLS)
+	fmt.Fprintf(&b, "XHTTP Non-TLS :\n%s\n\n", l.XHTTPNTLS)
+	fmt.Fprintf(&b, "gRPC TLS :\n%s\n", l.GRPC)
 	fmt.Fprintf(&b, "────────────────────────────────────────────────────\n")
-	fmt.Fprintf(&b, "Link Txt : %s\n", l.TxtURL)
+	fmt.Fprintf(&b, "Config File : %s\n", l.TxtURL)
 	return b.String()
 }
 
@@ -488,7 +488,7 @@ func DeleteXrayAccount(p Protocol, user string) error {
 
 func RenewXrayAccountInFile(configPath string, p Protocol, user string, addDays int) (string, error) {
 	if addDays <= 0 {
-		return "", fmt.Errorf("jumlah hari harus > 0")
+		return "", fmt.Errorf("days must be greater than 0")
 	}
 	raw, err := os.ReadFile(configPath)
 	if err != nil {
@@ -552,7 +552,7 @@ func CreateSSHAccount(params SSHCreateParams) (string, error) {
 		return "", err
 	}
 	if params.Password == "" {
-		return "", fmt.Errorf("password tidak boleh kosong")
+		return "", fmt.Errorf("password is required")
 	}
 	if params.Days <= 0 {
 		params.Days = 1
@@ -579,8 +579,8 @@ func CreateSSHAccount(params SSHCreateParams) (string, error) {
 	detail := FormatSSHDetail(params.Username, params.Password, params.IPLimit, expHuman)
 	_ = writeAtomic(fmt.Sprintf("/var/www/html/ssh-%s.txt", params.Username), []byte(detail), 0644)
 	domain := readTrimmed("/etc/xray/domain", "-")
-	ns := readTrimmed("/etc/xray/dns", "Belum diset")
-	pub := readFirstNonEmpty([]string{"/etc/slowdns/server.pub", "/root/slowdns/server.pub"}, "Belum diset")
+	ns := readTrimmed("/etc/xray/dns", "Not set")
+	pub := readFirstNonEmpty([]string{"/etc/slowdns/server.pub", "/root/slowdns/server.pub"}, "Not set")
 	sendTelegram(fmt.Sprintf("<b>Create SSH Success</b>\n<code>Host : %s\nUser : %s\nPass : %s\nExp  : %s\nNS   : %s\nPub  : %s</code>", domain, params.Username, params.Password, expHuman, ns, pub))
 	return detail, nil
 }
@@ -588,28 +588,28 @@ func CreateSSHAccount(params SSHCreateParams) (string, error) {
 func FormatSSHDetail(user, pass string, ipLimit int, expHuman string) string {
 	domain := readTrimmed("/etc/xray/domain", "-")
 	ip := readTrimmed("/root/.myip", "-")
-	ns := readTrimmed("/etc/xray/dns", "Belum diset")
-	pub := readFirstNonEmpty([]string{"/etc/slowdns/server.pub", "/root/slowdns/server.pub"}, "Belum diset")
+	ns := readTrimmed("/etc/xray/dns", "Not set")
+	pub := readFirstNonEmpty([]string{"/etc/slowdns/server.pub", "/root/slowdns/server.pub"}, "Not set")
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "◇━━━━━━━━━━━━━━━━━◇\n")
-	fmt.Fprintf(&b, "  AKUN SSH & SLOWDNS\n")
+	fmt.Fprintf(&b, "  SSH ACCOUNT\n")
 	fmt.Fprintf(&b, "◇━━━━━━━━━━━━━━━━━◇\n")
 	fmt.Fprintf(&b, "Host          : %s\n", domain)
 	fmt.Fprintf(&b, "IP VPS        : %s\n", ip)
 	fmt.Fprintf(&b, "Username      : %s\n", user)
 	fmt.Fprintf(&b, "Password      : %s\n", pass)
-	fmt.Fprintf(&b, "Limit IP      : %d device\n", ipLimit)
+	fmt.Fprintf(&b, "IP Limit      : %d\n", ipLimit)
 	fmt.Fprintf(&b, "Expired       : %s\n", expHuman)
 	fmt.Fprintf(&b, "◇━━━━━━━━━━━━━━━━━◇\n")
 	fmt.Fprintf(&b, "SSH CUSTOM    : %s:80@%s:%s\n", domain, user, pass)
 	fmt.Fprintf(&b, "SSH SSL/TLS   : %s:443@%s:%s\n", domain, user, pass)
 	fmt.Fprintf(&b, "UDP CUSTOM    : %s:1-65535@%s:%s\n", domain, user, pass)
 	fmt.Fprintf(&b, "◇━━━━━━━━━━━━━━━━━◇\n")
-	fmt.Fprintf(&b, "SLOWDNS (HTTP Custom) :\n")
-	fmt.Fprintf(&b, "Name Server   : %s\n", ns)
-	fmt.Fprintf(&b, "Pub Key       : %s\n", pub)
-	fmt.Fprintf(&b, "Port DNS      : 53\n")
+	fmt.Fprintf(&b, "SLOWDNS\n")
+	fmt.Fprintf(&b, "Nameserver    : %s\n", ns)
+	fmt.Fprintf(&b, "Public Key    : %s\n", pub)
+	fmt.Fprintf(&b, "DNS Port      : 53\n")
 	fmt.Fprintf(&b, "◇━━━━━━━━━━━━━━━━━◇\n")
 	return b.String()
 }
@@ -647,7 +647,7 @@ func DeleteSSHAccount(user string) error {
 
 func RenewSSHAccount(user string, addDays int) (string, error) {
 	if addDays <= 0 {
-		return "", fmt.Errorf("jumlah hari harus > 0")
+		return "", fmt.Errorf("days must be greater than 0")
 	}
 	expDate := time.Now().AddDate(0, 0, addDays)
 	expISO := expDate.Format("2006-01-02")
@@ -711,10 +711,10 @@ func CheckXrayLoginsFromLog(logPath string, users []string, p Protocol) string {
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "◇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◇\n")
-	fmt.Fprintf(&b, "  USER LOGIN %s\n", strings.ToUpper(string(p)))
+	fmt.Fprintf(&b, "  %s ACTIVE LOGINS\n", strings.ToUpper(string(p)))
 	fmt.Fprintf(&b, "◇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◇\n")
 	if len(activeIPs) == 0 {
-		b.WriteString("  Tidak ada user aktif di access.log.\n")
+		b.WriteString("  No active sessions.\n")
 		return b.String()
 	}
 	names := make([]string, 0, len(activeIPs))
@@ -819,10 +819,10 @@ func CheckSSHLogins() string {
 	dbSess, sshSess := ParseSSHLoginsFromText(logBuf.String(), liveDB, liveSSH)
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "DROPBEAR LOGIN (%d sesi aktif)\n", len(dbSess))
+	fmt.Fprintf(&b, "DROPBEAR ACTIVE  %d\n", len(dbSess))
 	b.WriteString("────────────────────────────────────────────────────\n")
 	if len(dbSess) == 0 {
-		b.WriteString("  Tidak ada user Dropbear aktif.\n")
+		b.WriteString("  No active Dropbear sessions.\n")
 	} else {
 		fmt.Fprintf(&b, "  %-7s %-16s %-6s %s\n", "PID", "Username", "Limit", "IP Address")
 		for _, s := range dbSess {
@@ -831,10 +831,10 @@ func CheckSSHLogins() string {
 		}
 	}
 
-	fmt.Fprintf(&b, "\nOPENSSH LOGIN (%d sesi aktif)\n", len(sshSess))
+	fmt.Fprintf(&b, "\nOPENSSH ACTIVE  %d\n", len(sshSess))
 	b.WriteString("────────────────────────────────────────────────────\n")
 	if len(sshSess) == 0 {
-		b.WriteString("  Tidak ada user OpenSSH aktif.\n")
+		b.WriteString("  No active OpenSSH sessions.\n")
 	} else {
 		fmt.Fprintf(&b, "  %-7s %-16s %-6s %s\n", "PID", "Username", "Limit", "IP Address")
 		for _, s := range sshSess {
@@ -858,7 +858,7 @@ func CheckSSHLogins() string {
 		}
 	}
 	if len(ovpnLines) > 0 {
-		fmt.Fprintf(&b, "\nOPENVPN LOGIN (%d sesi aktif)\n", len(ovpnLines))
+		fmt.Fprintf(&b, "\nOPENVPN ACTIVE  %d\n", len(ovpnLines))
 		b.WriteString("────────────────────────────────────────────────────\n")
 		b.WriteString(strings.Join(ovpnLines, "\n") + "\n")
 	}
@@ -894,9 +894,9 @@ func CleanExpiredXray() string {
 		}
 	}
 	if len(removed) == 0 {
-		return "Tidak ada akun Xray yang expired hari ini."
+		return "No expired Xray accounts."
 	}
-	return "Akun expired dihapus:\n- " + strings.Join(removed, "\n- ")
+	return "Removed expired Xray accounts:\n- " + strings.Join(removed, "\n- ")
 }
 
 func ClearCacheAndLogs() string {
@@ -907,7 +907,7 @@ func ClearCacheAndLogs() string {
 			_ = os.Truncate(logFile, 0)
 		}
 	}
-	return "RAM cache & log akses berhasil dibersihkan (izin file tetap utuh)."
+	return "Cache and logs cleared."
 }
 
 func upsertDBLine(path, user, newLine string) error {
@@ -1049,9 +1049,9 @@ func CleanExpiredSSH() string {
 		}
 	}
 	if len(removed) == 0 {
-		return "Tidak ada akun SSH yang expired hari ini."
+		return "No expired SSH accounts."
 	}
-	return "Akun SSH expired dihapus:\n- " + strings.Join(removed, "\n- ")
+	return "Removed expired SSH accounts:\n- " + strings.Join(removed, "\n- ")
 }
 
 func CleanAllExpired() string {
@@ -1156,10 +1156,10 @@ func UnlockXrayAccount(p Protocol, user string) error {
 
 func ListMembers(p Protocol, users []string, exps map[string]string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "DAFTAR MEMBER %s (%d akun)\n", strings.ToUpper(string(p)), len(users))
+	fmt.Fprintf(&b, "%s MEMBERS  %d\n", strings.ToUpper(string(p)), len(users))
 	b.WriteString("────────────────────────────────────────────────────\n")
 	if len(users) == 0 {
-		b.WriteString("Belum ada akun.\n")
+		b.WriteString("No accounts found.\n")
 		return b.String()
 	}
 	if p == ProtoSSH {
@@ -1184,7 +1184,7 @@ func ListMembers(p Protocol, users []string, exps map[string]string) string {
 		fmt.Fprintf(&b, "%-3d %-15s %-6s %-8s %-12s\n", i+1, u, lim, qStr, exps[u])
 	}
 	if locked := ListLockedXrayUsers(p); len(locked) > 0 {
-		b.WriteString("\nAkun terkunci (locked): " + strings.Join(locked, ", ") + "\n")
+		b.WriteString("\nLocked accounts: " + strings.Join(locked, ", ") + "\n")
 	}
 	return b.String()
 }

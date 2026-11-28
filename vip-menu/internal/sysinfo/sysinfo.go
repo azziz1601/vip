@@ -68,8 +68,8 @@ func Collect() Snapshot {
 		CPUCores:   runtime.NumCPU(),
 		Uptime:     readUptime("/proc/uptime"),
 		LoadAvg:    readLoadAvg("/proc/loadavg"),
-		SlowDNSNS:  readTrimmed("/etc/xray/dns", "Belum diset"),
-		SlowDNSPub: readFirstNonEmpty([]string{"/etc/slowdns/server.pub", "/root/slowdns/server.pub"}, "Belum diset"),
+		SlowDNSNS:  readTrimmed("/etc/xray/dns", "Not set"),
+		SlowDNSPub: readFirstNonEmpty([]string{"/etc/slowdns/server.pub", "/root/slowdns/server.pub"}, "Not set"),
 		BW:         readBandwidth(),
 	}
 
