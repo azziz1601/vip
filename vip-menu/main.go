@@ -12,7 +12,7 @@ import (
 	"github.com/azziz1601/vip/vip-menu/internal/tui"
 )
 
-const version = "1.7.0"
+const version = "1.7.1"
 
 func main() {
 	if len(os.Args) > 1 {

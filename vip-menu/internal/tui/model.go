@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -70,6 +71,7 @@ type menuItem struct {
 }
 
 type execFinishedMsg struct{ err error }
+type clearNoticeMsg struct{ seq int }
 type serviceActionMsg struct {
 	service string
 	action  string
@@ -84,7 +86,8 @@ type Model struct {
 	width   int
 	height  int
 	snap    sysinfo.Snapshot
-	notice  string
+	notice    string
+	noticeSeq int
 
 	fMode      formMode
 	fTitle     string
@@ -143,8 +146,8 @@ var (
 func mainLine() string { return ruleStyle.Render(strings.Repeat("─", panelWidth)) }
 func thinLine() string { return subRuleStyle.Render(strings.Repeat("─", panelWidth)) }
 
-func NewModel(version string) Model {
-	return Model{
+func NewModel(version string) *Model {
+	return &Model{
 		version: version,
 		view:    viewDashboard,
 		snap:    sysinfo.Collect(),
@@ -303,6 +306,15 @@ func openAutoBackupForm() func(m *Model) tea.Cmd {
 	}
 }
 
+func (m *Model) setNotice(text string) tea.Cmd {
+	m.notice = text
+	m.noticeSeq++
+	seq := m.noticeSeq
+	return tea.Tick(3*time.Second, func(time.Time) tea.Msg {
+		return clearNoticeMsg{seq: seq}
+	})
+}
+
 func goView(v viewID) func(m *Model) tea.Cmd {
 	return func(m *Model) tea.Cmd {
 		m.view = v
@@ -381,8 +393,7 @@ func runQuickTrial() func(m *Model) tea.Cmd {
 			})
 		}
 		if err != nil {
-			m.notice = errStyle.Render("Failed: " + err.Error())
-			return nil
+			return m.setNotice(errStyle.Render("Failed: " + err.Error()))
 		}
 		m.snap = sysinfo.Collect()
 		m.view = viewProtoMenu
@@ -404,11 +415,9 @@ func openPicker(act pickAction) func(m *Model) tea.Cmd {
 		}
 		if len(list) == 0 {
 			if act == pickUnlock && m.proto != accounts.ProtoSSH {
-				m.notice = warnStyle.Render("No locked accounts")
-			} else {
-				m.notice = warnStyle.Render("No accounts found")
+				return m.setNotice(warnStyle.Render("No locked accounts"))
 			}
-			return nil
+			return m.setNotice(warnStyle.Render("No accounts found"))
 		}
 		m.pAction = act
 		m.pUsers = list
@@ -566,7 +575,7 @@ func (m *Model) syncPickerViewport(total int) {
 	}
 }
 
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -576,23 +585,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case clearNoticeMsg:
+		if msg.seq == m.noticeSeq {
+			m.notice = ""
+		}
+		return m, nil
+
 	case execFinishedMsg:
 		m.snap = sysinfo.Collect()
 		if msg.err != nil {
-			m.notice = errStyle.Render("Error: " + msg.err.Error())
-		} else {
-			m.notice = ""
+			return m, m.setNotice(errStyle.Render("Error: " + msg.err.Error()))
 		}
+		m.notice = ""
 		return m, nil
 
 	case serviceActionMsg:
 		m.snap = sysinfo.Collect()
 		if msg.err != nil {
-			m.notice = errStyle.Render(fmt.Sprintf("Failed to %s %s", msg.action, msg.service))
-		} else {
-			m.notice = okStyle.Render(fmt.Sprintf("Service %s %sed", msg.service, msg.action))
+			return m, m.setNotice(errStyle.Render(fmt.Sprintf("Failed to %s %s", msg.action, msg.service)))
 		}
-		return m, nil
+		return m, m.setNotice(okStyle.Render(fmt.Sprintf("Service %s %sed", msg.service, msg.action)))
 
 	case tea.KeyMsg:
 		if m.view == viewForm {
@@ -625,9 +637,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "r":
 			m.snap = sysinfo.Collect()
-			m.notice = okStyle.Render("Refreshed")
-			return m, nil
+			return m, m.setNotice(okStyle.Render("Refreshed"))
 		case "up", "k":
+			m.notice = ""
 			if m.cursor > 0 {
 				m.cursor--
 			} else if len(items) > 0 {
@@ -635,6 +647,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "down", "j":
+			m.notice = ""
 			if len(items) > 0 {
 				m.cursor = (m.cursor + 1) % len(items)
 			}
@@ -657,7 +670,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
 		return m, tea.Quit
@@ -703,7 +716,7 @@ func (m Model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) submitForm() (tea.Model, tea.Cmd) {
+func (m *Model) submitForm() (tea.Model, tea.Cmd) {
 	switch m.fMode {
 	case formCreateSSH:
 		user := strings.TrimSpace(m.fFields[0].Value)
@@ -714,8 +727,7 @@ func (m Model) submitForm() (tea.Model, tea.Cmd) {
 			Username: user, Password: pass, Days: days, IPLimit: ipLim,
 		})
 		if err != nil {
-			m.notice = errStyle.Render(err.Error())
-			return m, nil
+			return m, m.setNotice(errStyle.Render(err.Error()))
 		}
 		m.snap = sysinfo.Collect()
 		m.view = viewProtoMenu
@@ -731,8 +743,7 @@ func (m Model) submitForm() (tea.Model, tea.Cmd) {
 			Proto: m.proto, Username: user, Days: days, QuotaGB: quotaGB, IPLimit: ipLim,
 		})
 		if err != nil {
-			m.notice = errStyle.Render(err.Error())
-			return m, nil
+			return m, m.setNotice(errStyle.Render(err.Error()))
 		}
 		m.snap = sysinfo.Collect()
 		m.view = viewProtoMenu
@@ -749,60 +760,50 @@ func (m Model) submitForm() (tea.Model, tea.Cmd) {
 			newExp, err = accounts.RenewXrayAccount(m.proto, m.fTargetUsr, days)
 		}
 		if err != nil {
-			m.notice = errStyle.Render(err.Error())
-			return m, nil
+			return m, m.setNotice(errStyle.Render(err.Error()))
 		}
 		m.snap = sysinfo.Collect()
-		m.notice = okStyle.Render(fmt.Sprintf("Renewed %s until %s", m.fTargetUsr, newExp))
 		m.view = viewProtoMenu
 		m.cursor = 0
-		return m, nil
+		return m, m.setNotice(okStyle.Render(fmt.Sprintf("Renewed %s until %s", m.fTargetUsr, newExp)))
 
 	case formChangeIPLimit:
 		newLim, _ := strconv.Atoi(m.fFields[0].Value)
 		if err := accounts.ChangeIPLimit(m.proto, m.fTargetUsr, newLim); err != nil {
-			m.notice = errStyle.Render(err.Error())
-			return m, nil
+			return m, m.setNotice(errStyle.Render(err.Error()))
 		}
 		m.snap = sysinfo.Collect()
-		m.notice = okStyle.Render(fmt.Sprintf("Updated IP limit for %s to %d", m.fTargetUsr, newLim))
 		m.view = viewProtoMenu
 		m.cursor = 0
-		return m, nil
+		return m, m.setNotice(okStyle.Render(fmt.Sprintf("Updated IP limit for %s to %d", m.fTargetUsr, newLim)))
 
 	case formChangeQuotaGB:
 		newQ, _ := strconv.Atoi(m.fFields[0].Value)
 		if err := accounts.ChangeQuotaGB(m.proto, m.fTargetUsr, newQ); err != nil {
-			m.notice = errStyle.Render(err.Error())
-			return m, nil
+			return m, m.setNotice(errStyle.Render(err.Error()))
 		}
 		m.snap = sysinfo.Collect()
-		m.notice = okStyle.Render(fmt.Sprintf("Updated quota for %s to %d GB", m.fTargetUsr, newQ))
 		m.view = viewProtoMenu
 		m.cursor = 0
-		return m, nil
+		return m, m.setNotice(okStyle.Render(fmt.Sprintf("Updated quota for %s to %d GB", m.fTargetUsr, newQ)))
 
 	case formChangeDomain:
 		dom := strings.TrimSpace(m.fFields[0].Value)
 		if err := sysops.ChangeDomain(dom); err != nil {
-			m.notice = errStyle.Render(err.Error())
-			return m, nil
+			return m, m.setNotice(errStyle.Render(err.Error()))
 		}
 		m.snap = sysinfo.Collect()
-		m.notice = okStyle.Render("Domain updated to " + dom)
 		m.view = viewSystem
 		m.cursor = 0
-		return m, nil
+		return m, m.setNotice(okStyle.Render("Domain updated to " + dom))
 
 	case formBotNotif:
 		if err := sysops.ConfigureBotNotif(m.fFields[0].Value, m.fFields[1].Value); err != nil {
-			m.notice = errStyle.Render(err.Error())
-			return m, nil
+			return m, m.setNotice(errStyle.Render(err.Error()))
 		}
-		m.notice = okStyle.Render("Telegram notifications saved")
 		m.view = viewSystem
 		m.cursor = 0
-		return m, nil
+		return m, m.setNotice(okStyle.Render("Telegram notifications saved"))
 
 	case formLimitSpeed:
 		down, _ := strconv.Atoi(m.fFields[0].Value)
@@ -832,7 +833,7 @@ func (m Model) submitForm() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	filtered := m.filteredPickerUsers()
 	total := len(filtered)
 	vis := m.pickerVisibleRows()
@@ -921,9 +922,8 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				detail, err = accounts.GetXrayAccountDetail(m.proto, target)
 			}
 			if err != nil {
-				m.notice = errStyle.Render(err.Error())
 				m.view = viewProtoMenu
-				return m, nil
+				return m, m.setNotice(errStyle.Render(err.Error()))
 			}
 			m.view = viewProtoMenu
 			m.cursor = 0
@@ -969,15 +969,13 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			} else {
 				err = accounts.LockXrayAccount(m.proto, target)
 			}
-			if err != nil {
-				m.notice = errStyle.Render("Lock failed: " + err.Error())
-			} else {
-				m.notice = okStyle.Render(fmt.Sprintf("Locked %s", target))
-			}
 			m.snap = sysinfo.Collect()
 			m.view = viewProtoMenu
 			m.cursor = 0
-			return m, nil
+			if err != nil {
+				return m, m.setNotice(errStyle.Render("Lock failed: " + err.Error()))
+			}
+			return m, m.setNotice(okStyle.Render(fmt.Sprintf("Locked %s", target)))
 
 		case pickUnlock:
 			var err error
@@ -986,15 +984,13 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			} else {
 				err = accounts.UnlockXrayAccount(m.proto, target)
 			}
-			if err != nil {
-				m.notice = errStyle.Render("Unlock failed: " + err.Error())
-			} else {
-				m.notice = okStyle.Render(fmt.Sprintf("Unlocked %s", target))
-			}
 			m.snap = sysinfo.Collect()
 			m.view = viewProtoMenu
 			m.cursor = 0
-			return m, nil
+			if err != nil {
+				return m, m.setNotice(errStyle.Render("Unlock failed: " + err.Error()))
+			}
+			return m, m.setNotice(okStyle.Render(fmt.Sprintf("Unlocked %s", target)))
 
 		case pickDelete:
 			var err error
@@ -1003,15 +999,13 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			} else {
 				err = accounts.DeleteXrayAccount(m.proto, target)
 			}
-			if err != nil {
-				m.notice = errStyle.Render("Delete failed: " + err.Error())
-			} else {
-				m.notice = okStyle.Render(fmt.Sprintf("Deleted %s", target))
-			}
 			m.snap = sysinfo.Collect()
 			m.view = viewProtoMenu
 			m.cursor = 0
-			return m, nil
+			if err != nil {
+				return m, m.setNotice(errStyle.Render("Delete failed: " + err.Error()))
+			}
+			return m, m.setNotice(okStyle.Render(fmt.Sprintf("Deleted %s", target)))
 		}
 	default:
 		if len(msg.Runes) > 0 {
