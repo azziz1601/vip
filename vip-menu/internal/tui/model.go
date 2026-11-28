@@ -654,7 +654,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "enter":
 			if m.cursor >= 0 && m.cursor < len(items) && items[m.cursor].Run != nil {
-				return m, items[m.cursor].Run(&m)
+				return m, items[m.cursor].Run(m)
 			}
 			return m, nil
 		default:
@@ -662,7 +662,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			for idx, it := range items {
 				if strings.ToLower(it.Key) == key && it.Run != nil {
 					m.cursor = idx
-					return m, it.Run(&m)
+					return m, it.Run(m)
 				}
 			}
 		}
