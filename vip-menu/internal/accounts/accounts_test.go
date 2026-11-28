@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestXrayAddRenewDeleteRoundtrip(t *testing.T) {
@@ -89,5 +90,45 @@ Nov 28 11:46:00 localhost sshd[5678]: Accepted password for linda from 114.10.20
 	}
 	if len(ssh) != 1 || ssh[0].Username != "linda" || ssh[0].PID != "5678" {
 		t.Fatalf("unexpected sshd sessions: %+v", ssh)
+	}
+}
+
+
+func TestRandomPassword(t *testing.T) {
+	for i := 0; i < 20; i++ {
+		pw := RandomPassword(6)
+		if len(pw) != 6 {
+			t.Fatalf("expected length 6, got %d (%q)", len(pw), pw)
+		}
+		hasLetter, hasDigit := false, false
+		for _, r := range pw {
+			if r >= 'a' && r <= 'z' {
+				hasLetter = true
+			} else if r >= '0' && r <= '9' {
+				hasDigit = true
+			} else {
+				t.Fatalf("unexpected char %q in %q", r, pw)
+			}
+		}
+		if !hasLetter || !hasDigit {
+			t.Fatalf("password %q must contain both lowercase letter and digit", pw)
+		}
+	}
+}
+
+func TestParseTrialDuration(t *testing.T) {
+	d, lbl, err := ParseTrialDuration("30m")
+	if err != nil || d != 30*time.Minute || lbl != "30m" {
+		t.Fatalf("30m parse failed: %v %q %v", d, lbl, err)
+	}
+	d, lbl, err = ParseTrialDuration("1H")
+	if err != nil || d != time.Hour || lbl != "1h" {
+		t.Fatalf("1H parse failed: %v %q %v", d, lbl, err)
+	}
+	if _, _, err := ParseTrialDuration("30s"); err == nil {
+		t.Fatalf("expected error for 30s")
+	}
+	if _, _, err := ParseTrialDuration(""); err == nil {
+		t.Fatalf("expected error for empty duration")
 	}
 }

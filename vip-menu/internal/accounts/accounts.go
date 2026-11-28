@@ -62,6 +62,72 @@ func RandomTrialUser(prefix string) string {
 	return fmt.Sprintf("%s%d", prefix, num)
 }
 
+func RandomPassword(length int) string {
+	if length < 2 {
+		length = 6
+	}
+	const letters = "abcdefghijklmnopqrstuvwxyz"
+	const digits = "0123456789"
+	const all = letters + digits
+
+	buf := make([]byte, length)
+	rnd := make([]byte, length+4)
+	_, _ = rand.Read(rnd)
+
+	buf[0] = letters[int(rnd[0])%len(letters)]
+	buf[1] = digits[int(rnd[1])%len(digits)]
+	for i := 2; i < length; i++ {
+		buf[i] = all[int(rnd[i])%len(all)]
+	}
+	// Fisher-Yates shuffle using remaining random bytes
+	for i := length - 1; i > 0; i-- {
+		j := int(rnd[i%len(rnd)]^rnd[(i+2)%len(rnd)]) % (i + 1)
+		buf[i], buf[j] = buf[j], buf[i]
+	}
+	return string(buf)
+}
+
+func ParseTrialDuration(raw string) (time.Duration, string, error) {
+	s := strings.ToLower(strings.TrimSpace(raw))
+	if s == "" {
+		return 0, "", fmt.Errorf("duration is required (example: 30m or 1h)")
+	}
+	dur, err := time.ParseDuration(s)
+	if err != nil || dur < time.Minute {
+		return 0, "", fmt.Errorf("invalid duration %q (use e.g. 1m, 30m, 1h)", raw)
+	}
+	if dur%(time.Minute) != 0 {
+		return 0, "", fmt.Errorf("use minutes or hours only (e.g. 15m, 1h)")
+	}
+	return dur, s, nil
+}
+
+func ScheduleTrialDeletion(p Protocol, user string, dur time.Duration) error {
+	secs := int(dur.Seconds())
+	if secs < 60 {
+		secs = 60
+	}
+	bin := "/usr/local/bin/vip-menu"
+	if _, err := os.Stat(bin); err != nil {
+		if exe, e := os.Executable(); e == nil {
+			bin = exe
+		}
+	}
+	unit := fmt.Sprintf("vip-trial-del-%s-%s-%d", p, user, time.Now().Unix())
+	cmd := exec.Command("systemd-run",
+		fmt.Sprintf("--on-active=%ds", secs),
+		"--unit="+unit,
+		"--description=Auto-delete trial "+string(p)+" "+user,
+		bin, "--delete-account", string(p), user,
+	)
+	if err := cmd.Run(); err == nil {
+		return nil
+	}
+	// Fallback if systemd-run is unavailable
+	bg := fmt.Sprintf("nohup sh -c 'sleep %d && %s --delete-account %s %s' >/dev/null 2>&1 &", secs, bin, p, user)
+	return exec.Command("sh", "-c", bg).Run()
+}
+
 func protoMarker(p Protocol) string {
 	switch p {
 	case ProtoVMess:
@@ -355,6 +421,43 @@ func CreateXrayAccount(params XrayCreateParams) (string, error) {
 	return detail, nil
 }
 
+func CreateXrayTrialAccount(p Protocol, dur time.Duration, durLabel string, ipLimit, quotaGB int) (string, error) {
+	user := RandomTrialUser("trial")
+	params := XrayCreateParams{
+		Proto:    p,
+		Username: user,
+		Days:     1,
+		QuotaGB:  quotaGB,
+		IPLimit:  ipLimit,
+	}
+	uuid, _, err := AddXrayAccountToFile(XrayConfigPath, params)
+	if err != nil {
+		return "", err
+	}
+
+	expTime := time.Now().Add(dur)
+	expLabel := fmt.Sprintf("%s (%s)", expTime.Format("2006-01-02 15:04"), durLabel)
+
+	if ipLimit > 0 {
+		_ = writeAtomic(filepath.Join(protoIPLimitDir(p), user), []byte(fmt.Sprintf("%d\n", ipLimit)), 0644)
+	}
+	if quotaGB > 0 {
+		bytesVal := int64(quotaGB) * 1024 * 1024 * 1024
+		_ = writeAtomic(filepath.Join(protoQuotaDir(p), user), []byte(fmt.Sprintf("%d\n", bytesVal)), 0644)
+	}
+	_ = upsertDBLine(protoDBPath(p), user, fmt.Sprintf("### %s %s %s %d %d", user, expTime.Format("2006-01-02"), uuid, quotaGB, ipLimit))
+
+	reloadXray()
+	_ = ScheduleTrialDeletion(p, user, dur)
+
+	domain := readTrimmed("/etc/xray/domain", "localhost")
+	links := BuildXrayLinks(p, domain, user, uuid)
+	detail := FormatXrayDetail(p, domain, user, uuid, expLabel, quotaGB, ipLimit, links)
+	_ = writeAtomic(fmt.Sprintf("/var/www/html/%s-%s.txt", p, user), []byte(detail), 0644)
+	sendTelegram(fmt.Sprintf("<b>Trial %s Created</b>\n<code>User : %s\nExp  : %s\nHost : %s</code>\n\n<code>%s</code>", strings.ToUpper(string(p)), user, expLabel, domain, links.WSTLS))
+	return detail, nil
+}
+
 func FormatXrayDetail(p Protocol, domain, user, uuid, exp string, quotaGB, ipLimit int, l XrayLinks) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Remarks  : %s\n", user)
@@ -585,6 +688,38 @@ func CreateSSHAccount(params SSHCreateParams) (string, error) {
 	return detail, nil
 }
 
+func CreateSSHTrialAccount(dur time.Duration, durLabel string, ipLimit int) (string, error) {
+	user := RandomTrialUser("trial")
+	pass := RandomPassword(6)
+
+	expTime := time.Now().Add(dur)
+	expISO := expTime.AddDate(0, 0, 1).Format("2006-01-02")
+	expLabel := fmt.Sprintf("%s (%s)", expTime.Format("2006-01-02 15:04"), durLabel)
+
+	if out, err := exec.Command("useradd", "-e", expISO, "-s", "/bin/false", "-M", user).CombinedOutput(); err != nil {
+		return "", fmt.Errorf("useradd failed: %s", strings.TrimSpace(string(out)))
+	}
+	chp := exec.Command("chpasswd")
+	chp.Stdin = strings.NewReader(user + ":" + pass + "\n")
+	if out, err := chp.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("chpasswd failed: %s", strings.TrimSpace(string(out)))
+	}
+
+	if ipLimit > 0 {
+		_ = writeAtomic(filepath.Join(protoIPLimitDir(ProtoSSH), user), []byte(fmt.Sprintf("%d\n", ipLimit)), 0644)
+	}
+	_ = upsertDBLine(SSHDBPath, user, fmt.Sprintf("#ssh# %s %s 0 %d %s", user, pass, ipLimit, expLabel))
+	_ = ScheduleTrialDeletion(ProtoSSH, user, dur)
+
+	detail := FormatSSHDetail(user, pass, ipLimit, expLabel)
+	_ = writeAtomic(fmt.Sprintf("/var/www/html/ssh-%s.txt", user), []byte(detail), 0644)
+	domain := readTrimmed("/etc/xray/domain", "-")
+	ns := readTrimmed("/etc/xray/dns", "Not set")
+	pub := readFirstNonEmpty([]string{"/etc/slowdns/server.pub", "/root/slowdns/server.pub"}, "Not set")
+	sendTelegram(fmt.Sprintf("<b>Trial SSH Created</b>\n<code>Host : %s\nUser : %s\nPass : %s\nExp  : %s\nNS   : %s\nPub  : %s</code>", domain, user, pass, expLabel, ns, pub))
+	return detail, nil
+}
+
 func FormatSSHDetail(user, pass string, ipLimit int, expHuman string) string {
 	domain := readTrimmed("/etc/xray/domain", "-")
 	ip := readTrimmed("/root/.myip", "-")
@@ -638,6 +773,7 @@ func GetSSHAccountDetail(user string) (string, error) {
 }
 
 func DeleteSSHAccount(user string) error {
+	_ = exec.Command("pkill", "-u", user).Run()
 	_ = exec.Command("userdel", "-f", user).Run()
 	_ = removeDBLine(SSHDBPath, user)
 	_ = os.Remove(filepath.Join(protoIPLimitDir(ProtoSSH), user))

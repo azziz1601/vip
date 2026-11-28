@@ -48,6 +48,8 @@ type formMode int
 const (
 	formCreateSSH formMode = iota
 	formCreateXray
+	formTrialSSH
+	formTrialXray
 	formRenewAccount
 	formChangeIPLimit
 	formChangeQuotaGB
@@ -59,9 +61,10 @@ const (
 )
 
 type formField struct {
-	Label   string
-	Value   string
-	Numeric bool
+	Label       string
+	Value       string
+	Placeholder string
+	Numeric     bool
 }
 
 type menuItem struct {
@@ -154,9 +157,9 @@ func NewModel(version string) *Model {
 	}
 }
 
-func (m Model) Init() tea.Cmd { return nil }
+func (m *Model) Init() tea.Cmd { return nil }
 
-func (m Model) currentAccounts() []sysinfo.Account {
+func (m *Model) currentAccounts() []sysinfo.Account {
 	switch m.proto {
 	case accounts.ProtoSSH:
 		return m.snap.SSHAccounts
@@ -171,7 +174,7 @@ func (m Model) currentAccounts() []sysinfo.Account {
 	}
 }
 
-func (m Model) itemsForCurrentView() []menuItem {
+func (m *Model) itemsForCurrentView() []menuItem {
 	switch m.view {
 	case viewDashboard:
 		return []menuItem{
@@ -190,7 +193,7 @@ func (m Model) itemsForCurrentView() []menuItem {
 		if m.proto == accounts.ProtoSSH {
 			return []menuItem{
 				{Key: "1", Label: "Create Account", Run: startCreateForm()},
-				{Key: "2", Label: "Trial Account", Run: runQuickTrial()},
+				{Key: "2", Label: "Trial Account", Run: startTrialForm()},
 				{Key: "3", Label: "Renew Account", Run: openPicker(pickRenew)},
 				{Key: "4", Label: "Active Logins", Run: runCheckLogins()},
 				{Key: "5", Label: "Member List", Run: runListMembers()},
@@ -207,7 +210,7 @@ func (m Model) itemsForCurrentView() []menuItem {
 		}
 		return []menuItem{
 			{Key: "1", Label: "Create Account", Run: startCreateForm()},
-			{Key: "2", Label: "Trial Account", Run: runQuickTrial()},
+			{Key: "2", Label: "Trial Account", Run: startTrialForm()},
 			{Key: "3", Label: "Delete Account", Run: openPicker(pickDelete)},
 			{Key: "4", Label: "Renew Account", Run: openPicker(pickRenew)},
 			{Key: "5", Label: "Active Logins", Run: runCheckLogins()},
@@ -359,45 +362,48 @@ func startCreateForm() func(m *Model) tea.Cmd {
 			m.fMode = formCreateSSH
 			m.fTitle = "CREATE SSH ACCOUNT"
 			m.fFields = []formField{
-				{Label: "Username     ", Value: ""},
-				{Label: "Password     ", Value: ""},
-				{Label: "IP Limit     ", Value: "2", Numeric: true},
-				{Label: "Days Active  ", Value: "30", Numeric: true},
+				{Label: "Username     ", Value: "", Placeholder: "john"},
+				{Label: "Password     ", Value: "", Placeholder: "secret"},
+				{Label: "IP Limit     ", Value: "", Placeholder: "2", Numeric: true},
+				{Label: "Days Active  ", Value: "", Placeholder: "30", Numeric: true},
 			}
 		} else {
 			m.fMode = formCreateXray
 			m.fTitle = "CREATE " + strings.ToUpper(string(m.proto)) + " ACCOUNT"
 			m.fFields = []formField{
-				{Label: "Username     ", Value: ""},
-				{Label: "IP Limit     ", Value: "2", Numeric: true},
-				{Label: "Quota GB     ", Value: "100", Numeric: true},
-				{Label: "Days Active  ", Value: "30", Numeric: true},
+				{Label: "Username     ", Value: "", Placeholder: "john"},
+				{Label: "IP Limit     ", Value: "", Placeholder: "2", Numeric: true},
+				{Label: "Quota GB     ", Value: "", Placeholder: "100", Numeric: true},
+				{Label: "Days Active  ", Value: "", Placeholder: "30", Numeric: true},
 			}
 		}
 		return nil
 	}
 }
 
-func runQuickTrial() func(m *Model) tea.Cmd {
+func startTrialForm() func(m *Model) tea.Cmd {
 	return func(m *Model) tea.Cmd {
-		user := accounts.RandomTrialUser("trial")
-		var detail string
-		var err error
+		m.view = viewForm
+		m.fFocus = 0
+		m.fBack = viewProtoMenu
+		m.notice = ""
 		if m.proto == accounts.ProtoSSH {
-			detail, err = accounts.CreateSSHAccount(accounts.SSHCreateParams{
-				Username: user, Password: "1", Days: 1, IPLimit: 2,
-			})
+			m.fMode = formTrialSSH
+			m.fTitle = "TRIAL SSH ACCOUNT"
+			m.fFields = []formField{
+				{Label: "Duration     ", Value: "", Placeholder: "30m or 1h"},
+				{Label: "IP Limit     ", Value: "", Placeholder: "2", Numeric: true},
+			}
 		} else {
-			detail, err = accounts.CreateXrayAccount(accounts.XrayCreateParams{
-				Proto: m.proto, Username: user, Days: 1, QuotaGB: 1, IPLimit: 2,
-			})
+			m.fMode = formTrialXray
+			m.fTitle = "TRIAL " + strings.ToUpper(string(m.proto)) + " ACCOUNT"
+			m.fFields = []formField{
+				{Label: "Duration     ", Value: "", Placeholder: "30m or 1h"},
+				{Label: "IP Limit     ", Value: "", Placeholder: "2", Numeric: true},
+				{Label: "Quota GB     ", Value: "", Placeholder: "1", Numeric: true},
+			}
 		}
-		if err != nil {
-			return m.setNotice(errStyle.Render("Failed: " + err.Error()))
-		}
-		m.snap = sysinfo.Collect()
-		m.view = viewProtoMenu
-		return showInTerminal(strings.ToUpper(string(m.proto))+" TRIAL ACCOUNT", detail)
+		return nil
 	}
 }
 
@@ -475,20 +481,20 @@ func runReport(title string, fn func() string, back viewID) func(m *Model) tea.C
 func runUpdateClean() func(m *Model) tea.Cmd {
 	return func(m *Model) tea.Cmd {
 		script := `clear
-printf "\033[1;37mSYSTEM UPDATE\033[0m\n────────────────────────────────────────────────\n"
-echo "Checking latest release..."
+printf "\033[1;38;2;241;245;249mSYSTEM UPDATE\033[0m\n\033[38;2;71;85;105m────────────────────────────────────────────────\033[0m\n"
+printf "\033[38;2;203;213;225mChecking latest release...\033[0m\n"
 SHA=$(curl -fsSL -H "Accept: application/vnd.github.sha" "https://api.github.com/repos/azziz1601/vip/commits/main" 2>/dev/null | tr -dc 'a-fA-F0-9')
 REF="${SHA:-main}"
-echo "Applying update..."
+printf "\033[38;2;203;213;225mApplying update...\033[0m\n"
 if curl -fsSL -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/azziz1601/vip/${REF}/update.sh?t=$(date +%s)" -o /tmp/update.sh; then
   chmod +x /tmp/update.sh
   VIP_MENU_NESTED=1 bash /tmp/update.sh </dev/null >/dev/null 2>&1
   rm -f /tmp/update.sh
-  echo "Update complete."
+  printf "\033[38;2;134;239;172mUpdate complete.\033[0m\n"
 else
-  echo "Update failed."
+  printf "\033[38;2;252;165;165mUpdate failed.\033[0m\n"
 fi
-printf "\n\033[90mPress Enter to return...\033[0m"
+printf "\n\033[38;2;100;116;139mPress Enter to return...\033[0m"
 read -r _ || true`
 		cmd := exec.Command("bash", "-c", script)
 		return tea.ExecProcess(cmd, func(err error) tea.Msg { return execFinishedMsg{err: nil} })
@@ -504,23 +510,62 @@ func runServiceAction(service, action string) func(m *Model) tea.Cmd {
 	}
 }
 
+func styleTerminalBody(body string) string {
+	const (
+		ansiReset  = "\033[0m"
+		ansiBright = "\033[1;38;2;241;245;249m"
+		ansiLine   = "\033[38;2;71;85;105m"
+		ansiLabel  = "\033[38;2;148;163;184m"
+		ansiMuted  = "\033[38;2;100;116;139m"
+		ansiText   = "\033[38;2;203;213;225m"
+		ansiAccent = "\033[38;2;147;197;253m"
+	)
+	lines := strings.Split(body, "\n")
+	var out strings.Builder
+	for idx, raw := range lines {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" {
+			// blank line
+		} else if strings.HasPrefix(trimmed, "──") {
+			out.WriteString(ansiLine + raw + ansiReset)
+		} else if strings.HasPrefix(trimmed, "vmess://") || strings.HasPrefix(trimmed, "vless://") || strings.HasPrefix(trimmed, "trojan://") || strings.HasPrefix(trimmed, "https://") {
+			out.WriteString(ansiAccent + raw + ansiReset)
+		} else if strings.HasSuffix(trimmed, " :") || strings.HasSuffix(trimmed, ":") {
+			out.WriteString(ansiLabel + raw + ansiReset)
+		} else if colonIdx := strings.Index(raw, " : "); colonIdx > 0 {
+			k := raw[:colonIdx]
+			v := raw[colonIdx+3:]
+			out.WriteString(ansiLabel + k + ansiMuted + " : " + ansiText + v + ansiReset)
+		} else if trimmed == strings.ToUpper(trimmed) && len(trimmed) >= 3 && !strings.ContainsAny(trimmed, "0123456789/=") {
+			out.WriteString(ansiBright + raw + ansiReset)
+		} else {
+			out.WriteString(ansiText + raw + ansiReset)
+		}
+		if idx < len(lines)-1 {
+			out.WriteByte('\n')
+		}
+	}
+	return out.String()
+}
+
 func showInTerminal(title, body string) tea.Cmd {
 	f, err := os.CreateTemp("", "vip-out-*.txt")
 	if err != nil {
 		return nil
 	}
 	tmpPath := f.Name()
-	_, _ = fmt.Fprintf(f, "\033[1;37m%s\033[0m\n%s\n%s\n", title, strings.Repeat("─", 48), body)
+	_, _ = fmt.Fprintf(f, "\033[1;38;2;241;245;249m%s\033[0m\n\033[38;2;71;85;105m%s\033[0m\n%s\n",
+		title, strings.Repeat("─", 48), styleTerminalBody(body))
 	_ = f.Close()
 
-	script := `clear; cat "$1"; rm -f "$1"; printf "\n\033[90mPress Enter to return...\033[0m"; read -r _ || true`
+	script := `clear; cat "$1"; rm -f "$1"; printf "\n\033[38;2;100;116;139mPress Enter to return...\033[0m"; read -r _ || true`
 	cmd := exec.Command("bash", "-c", script, "_", tmpPath)
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		return execFinishedMsg{err: nil}
 	})
 }
 
-func (m Model) pickerVisibleRows() int {
+func (m *Model) pickerVisibleRows() int {
 	rows := m.height - 11
 	if m.height <= 0 {
 		rows = 15
@@ -531,7 +576,7 @@ func (m Model) pickerVisibleRows() int {
 	return rows
 }
 
-func (m Model) filteredPickerUsers() []sysinfo.Account {
+func (m *Model) filteredPickerUsers() []sysinfo.Account {
 	if m.pQuery == "" {
 		return m.pUsers
 	}
@@ -616,7 +661,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		items := m.itemsForCurrentView()
 		switch msg.String() {
-		case "ctrl+c", "q":
+		case "q":
 			if m.view == viewDashboard {
 				return m, tea.Quit
 			}
@@ -624,12 +669,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cursor = 0
 			m.notice = ""
 			return m, nil
-		case "esc", "backspace":
+		case "esc", "ctrl+c":
+			if m.view == viewDashboard {
+				if msg.String() == "ctrl+c" {
+					return m, tea.Quit
+				}
+				return m, nil
+			}
 			if m.view == viewAutoReboot {
 				m.view = viewSystem
 			} else if m.view == viewAutokill {
 				m.view = viewProtoMenu
-			} else if m.view != viewDashboard {
+			} else {
 				m.view = viewDashboard
 			}
 			m.cursor = 0
@@ -672,9 +723,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *Model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "ctrl+c":
-		return m, tea.Quit
-	case "esc":
+	case "esc", "ctrl+c":
 		m.view = m.fBack
 		m.cursor = 0
 		m.notice = ""
@@ -749,6 +798,43 @@ func (m *Model) submitForm() (tea.Model, tea.Cmd) {
 		m.view = viewProtoMenu
 		m.cursor = 0
 		return m, showInTerminal(strings.ToUpper(string(m.proto))+" ACCOUNT CREATED", detail)
+
+	case formTrialSSH:
+		dur, durLabel, err := accounts.ParseTrialDuration(m.fFields[0].Value)
+		if err != nil {
+			return m, m.setNotice(errStyle.Render(err.Error()))
+		}
+		ipLim, _ := strconv.Atoi(strings.TrimSpace(m.fFields[1].Value))
+		if ipLim <= 0 {
+			ipLim = 2
+		}
+		detail, err := accounts.CreateSSHTrialAccount(dur, durLabel, ipLim)
+		if err != nil {
+			return m, m.setNotice(errStyle.Render(err.Error()))
+		}
+		m.snap = sysinfo.Collect()
+		m.view = viewProtoMenu
+		m.cursor = 0
+		return m, showInTerminal("SSH TRIAL ACCOUNT", detail)
+
+	case formTrialXray:
+		dur, durLabel, err := accounts.ParseTrialDuration(m.fFields[0].Value)
+		if err != nil {
+			return m, m.setNotice(errStyle.Render(err.Error()))
+		}
+		ipLim, _ := strconv.Atoi(strings.TrimSpace(m.fFields[1].Value))
+		if ipLim <= 0 {
+			ipLim = 2
+		}
+		quotaGB, _ := strconv.Atoi(strings.TrimSpace(m.fFields[2].Value))
+		detail, err := accounts.CreateXrayTrialAccount(m.proto, dur, durLabel, ipLim, quotaGB)
+		if err != nil {
+			return m, m.setNotice(errStyle.Render(err.Error()))
+		}
+		m.snap = sysinfo.Collect()
+		m.view = viewProtoMenu
+		m.cursor = 0
+		return m, showInTerminal(strings.ToUpper(string(m.proto))+" TRIAL ACCOUNT", detail)
 
 	case formRenewAccount:
 		days, _ := strconv.Atoi(m.fFields[0].Value)
@@ -839,9 +925,7 @@ func (m *Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	vis := m.pickerVisibleRows()
 
 	switch msg.String() {
-	case "ctrl+c":
-		return m, tea.Quit
-	case "esc":
+	case "esc", "ctrl+c":
 		if m.pQuery != "" {
 			m.pQuery = ""
 			m.cursor = 0
@@ -857,11 +941,7 @@ func (m *Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.pQuery = m.pQuery[:len(m.pQuery)-1]
 			m.cursor = 0
 			m.pOffset = 0
-			return m, nil
 		}
-		m.view = viewProtoMenu
-		m.cursor = 0
-		m.notice = ""
 		return m, nil
 	case "up":
 		if total > 0 {
@@ -934,7 +1014,7 @@ func (m *Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.fTargetUsr = target
 			m.fBack = viewProtoMenu
 			m.fTitle = fmt.Sprintf("RENEW %s — %s", strings.ToUpper(string(m.proto)), target)
-			m.fFields = []formField{{Label: "Add Days     ", Value: "30", Numeric: true}}
+			m.fFields = []formField{{Label: "Add Days     ", Value: "", Placeholder: "30", Numeric: true}}
 			m.fFocus = 0
 			m.notice = ""
 			m.view = viewForm
@@ -945,7 +1025,7 @@ func (m *Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.fTargetUsr = target
 			m.fBack = viewProtoMenu
 			m.fTitle = fmt.Sprintf("EDIT IP LIMIT — %s", target)
-			m.fFields = []formField{{Label: "New IP Limit ", Value: "2", Numeric: true}}
+			m.fFields = []formField{{Label: "New IP Limit ", Value: "", Placeholder: "2", Numeric: true}}
 			m.fFocus = 0
 			m.notice = ""
 			m.view = viewForm
@@ -956,7 +1036,7 @@ func (m *Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.fTargetUsr = target
 			m.fBack = viewProtoMenu
 			m.fTitle = fmt.Sprintf("EDIT QUOTA — %s", target)
-			m.fFields = []formField{{Label: "New Quota GB ", Value: "100", Numeric: true}}
+			m.fFields = []formField{{Label: "New Quota GB ", Value: "", Placeholder: "100", Numeric: true}}
 			m.fFocus = 0
 			m.notice = ""
 			m.view = viewForm
@@ -1025,7 +1105,7 @@ func (m *Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) View() string {
+func (m *Model) View() string {
 	var b strings.Builder
 
 	b.WriteString(mainLine() + "\n")
@@ -1040,20 +1120,29 @@ func (m Model) View() string {
 	if m.view == viewForm {
 		b.WriteString("\n  " + titleStyle.Render(m.fTitle) + "\n")
 		b.WriteString(thinLine() + "\n")
+		sep := mutedStyle.Render(":")
 		for i, f := range m.fFields {
 			cursorMark := "  "
-			valDisplay := valStyle.Render(f.Value)
+			var valDisplay string
 			if i == m.fFocus {
 				cursorMark = accStyle.Render("▸ ")
-				valDisplay = accStyle.Render(f.Value + "█")
+				if f.Value == "" && f.Placeholder != "" {
+					valDisplay = accStyle.Render("█") + mutedStyle.Render(" "+f.Placeholder)
+				} else {
+					valDisplay = accStyle.Render(f.Value + "█")
+				}
+			} else if f.Value == "" && f.Placeholder != "" {
+				valDisplay = mutedStyle.Render(f.Placeholder)
+			} else {
+				valDisplay = valStyle.Render(f.Value)
 			}
-			b.WriteString(fmt.Sprintf("%s%s : %s\n", cursorMark, labelStyle.Render(f.Label), valDisplay))
+			b.WriteString(fmt.Sprintf("%s%s %s %s\n", cursorMark, labelStyle.Render(f.Label), sep, valDisplay))
 		}
 		if m.notice != "" {
 			b.WriteString("\n  " + m.notice + "\n")
 		}
 		b.WriteString(mainLine() + "\n")
-		b.WriteString(mutedStyle.Render("  Tab Next  •  Enter Save  •  Esc Cancel") + "\n")
+		b.WriteString(mutedStyle.Render("  Tab Next  •  Enter Save  •  Esc/Ctrl+C Back") + "\n")
 		return b.String()
 	}
 
@@ -1113,10 +1202,10 @@ func (m Model) View() string {
 	if m.view == viewSlowDNS {
 		b.WriteString("\n  " + titleStyle.Render("SLOWDNS") + "\n")
 		b.WriteString(thinLine() + "\n")
-		b.WriteString(fmt.Sprintf("  %s : %s\n", labelStyle.Render("Domain     "), accStyle.Render(m.snap.Domain)))
-		b.WriteString(fmt.Sprintf("  %s : %s\n", labelStyle.Render("Nameserver "), accStyle.Render(m.snap.SlowDNSNS)))
-		b.WriteString(fmt.Sprintf("  %s : %s\n", labelStyle.Render("Public Key "), warnStyle.Render(m.snap.SlowDNSPub)))
-		b.WriteString(fmt.Sprintf("  %s : %s\n", labelStyle.Render("UDP Port   "), textStyle.Render("53")))
+		b.WriteString(fmt.Sprintf("  %s "+mutedStyle.Render(":")+" %s\n", labelStyle.Render("Domain     "), accStyle.Render(m.snap.Domain)))
+		b.WriteString(fmt.Sprintf("  %s "+mutedStyle.Render(":")+" %s\n", labelStyle.Render("Nameserver "), accStyle.Render(m.snap.SlowDNSNS)))
+		b.WriteString(fmt.Sprintf("  %s "+mutedStyle.Render(":")+" %s\n", labelStyle.Render("Public Key "), warnStyle.Render(m.snap.SlowDNSPub)))
+		b.WriteString(fmt.Sprintf("  %s "+mutedStyle.Render(":")+" %s\n", labelStyle.Render("UDP Port   "), textStyle.Render("53")))
 		b.WriteString(mainLine() + "\n")
 	} else if m.view == viewProtoMenu {
 		pTitle := strings.ToUpper(string(m.proto))
@@ -1134,8 +1223,8 @@ func (m Model) View() string {
 		if sysops.AutoBackupStatus() == "Active" {
 			abState = okStyle.Render("Active")
 		}
-		b.WriteString(fmt.Sprintf("  %s : %s\n", labelStyle.Render("Telegram Bot"), botState))
-		b.WriteString(fmt.Sprintf("  %s : %s\n", labelStyle.Render("Auto Backup "), abState))
+		b.WriteString(fmt.Sprintf("  %s "+mutedStyle.Render(":")+" %s\n", labelStyle.Render("Telegram Bot"), botState))
+		b.WriteString(fmt.Sprintf("  %s "+mutedStyle.Render(":")+" %s\n", labelStyle.Render("Auto Backup "), abState))
 		b.WriteString(thinLine() + "\n")
 	} else if m.view == viewSystem {
 		b.WriteString("\n  " + titleStyle.Render("SYSTEM") + "\n")
@@ -1168,26 +1257,26 @@ func (m Model) View() string {
 	return b.String()
 }
 
-func (m Model) renderDashboard() string {
+func (m *Model) renderDashboard() string {
 	var b strings.Builder
 
-	b.WriteString(fmt.Sprintf("  %s : %s\n", labelStyle.Render("OS     "), textStyle.Render(m.snap.OSName)))
-	b.WriteString(fmt.Sprintf("  %s : %s\n", labelStyle.Render("RAM    "), textStyle.Render(fmt.Sprintf("%dM / %dM", m.snap.MemUsedMB, m.snap.MemTotalMB))))
-	b.WriteString(fmt.Sprintf("  %s : %s\n", labelStyle.Render("SWAP   "), textStyle.Render(fmt.Sprintf("%dM", m.snap.SwapTotalMB))))
-	b.WriteString(fmt.Sprintf("  %s : %s\n", labelStyle.Render("CITY   "), textStyle.Render(m.snap.City)))
-	b.WriteString(fmt.Sprintf("  %s : %s\n", labelStyle.Render("ISP    "), textStyle.Render(m.snap.ISP)))
-	b.WriteString(fmt.Sprintf("  %s : %s\n", labelStyle.Render("IP     "), accStyle.Render(m.snap.IP)))
-	b.WriteString(fmt.Sprintf("  %s : %s\n", labelStyle.Render("DOMAIN "), accStyle.Render(m.snap.Domain)))
-	b.WriteString(fmt.Sprintf("  %s : %s\n", labelStyle.Render("UPTIME "), textStyle.Render(m.snap.Uptime)))
+	b.WriteString(fmt.Sprintf("  %s "+mutedStyle.Render(":")+" %s\n", labelStyle.Render("OS     "), textStyle.Render(m.snap.OSName)))
+	b.WriteString(fmt.Sprintf("  %s "+mutedStyle.Render(":")+" %s\n", labelStyle.Render("RAM    "), textStyle.Render(fmt.Sprintf("%dM / %dM", m.snap.MemUsedMB, m.snap.MemTotalMB))))
+	b.WriteString(fmt.Sprintf("  %s "+mutedStyle.Render(":")+" %s\n", labelStyle.Render("SWAP   "), textStyle.Render(fmt.Sprintf("%dM", m.snap.SwapTotalMB))))
+	b.WriteString(fmt.Sprintf("  %s "+mutedStyle.Render(":")+" %s\n", labelStyle.Render("CITY   "), textStyle.Render(m.snap.City)))
+	b.WriteString(fmt.Sprintf("  %s "+mutedStyle.Render(":")+" %s\n", labelStyle.Render("ISP    "), textStyle.Render(m.snap.ISP)))
+	b.WriteString(fmt.Sprintf("  %s "+mutedStyle.Render(":")+" %s\n", labelStyle.Render("IP     "), accStyle.Render(m.snap.IP)))
+	b.WriteString(fmt.Sprintf("  %s "+mutedStyle.Render(":")+" %s\n", labelStyle.Render("DOMAIN "), accStyle.Render(m.snap.Domain)))
+	b.WriteString(fmt.Sprintf("  %s "+mutedStyle.Render(":")+" %s\n", labelStyle.Render("UPTIME "), textStyle.Render(m.snap.Uptime)))
 	b.WriteString(thinLine() + "\n")
-	b.WriteString(fmt.Sprintf("  %s : %-13s %s\n", labelStyle.Render("MONTH  "), textStyle.Render(m.snap.BW.MonthTotal), mutedStyle.Render(m.snap.BW.MonthName)))
-	b.WriteString(fmt.Sprintf("  %s : %s\n", labelStyle.Render("RX     "), textStyle.Render(m.snap.BW.MonthRX)))
-	b.WriteString(fmt.Sprintf("  %s : %s\n", labelStyle.Render("TX     "), textStyle.Render(m.snap.BW.MonthTX)))
+	b.WriteString(fmt.Sprintf("  %s "+mutedStyle.Render(":")+" %-13s %s\n", labelStyle.Render("MONTH  "), textStyle.Render(m.snap.BW.MonthTotal), mutedStyle.Render(m.snap.BW.MonthName)))
+	b.WriteString(fmt.Sprintf("  %s "+mutedStyle.Render(":")+" %s\n", labelStyle.Render("RX     "), textStyle.Render(m.snap.BW.MonthRX)))
+	b.WriteString(fmt.Sprintf("  %s "+mutedStyle.Render(":")+" %s\n", labelStyle.Render("TX     "), textStyle.Render(m.snap.BW.MonthTX)))
 	b.WriteString(thinLine() + "\n")
-	b.WriteString(fmt.Sprintf("  %s : %-13s %s\n", labelStyle.Render("DAY    "), textStyle.Render(m.snap.BW.DayTotal), mutedStyle.Render(m.snap.BW.DayName)))
-	b.WriteString(fmt.Sprintf("  %s : %s\n", labelStyle.Render("RX     "), textStyle.Render(m.snap.BW.DayRX)))
-	b.WriteString(fmt.Sprintf("  %s : %s\n", labelStyle.Render("TX     "), textStyle.Render(m.snap.BW.DayTX)))
-	b.WriteString(fmt.Sprintf("  %s : %s\n", labelStyle.Render("RATE   "), textStyle.Render(m.snap.BW.TrafficRate)))
+	b.WriteString(fmt.Sprintf("  %s "+mutedStyle.Render(":")+" %-13s %s\n", labelStyle.Render("DAY    "), textStyle.Render(m.snap.BW.DayTotal), mutedStyle.Render(m.snap.BW.DayName)))
+	b.WriteString(fmt.Sprintf("  %s "+mutedStyle.Render(":")+" %s\n", labelStyle.Render("RX     "), textStyle.Render(m.snap.BW.DayRX)))
+	b.WriteString(fmt.Sprintf("  %s "+mutedStyle.Render(":")+" %s\n", labelStyle.Render("TX     "), textStyle.Render(m.snap.BW.DayTX)))
+	b.WriteString(fmt.Sprintf("  %s "+mutedStyle.Render(":")+" %s\n", labelStyle.Render("RATE   "), textStyle.Render(m.snap.BW.TrafficRate)))
 	b.WriteString(mainLine() + "\n")
 
 	svcBadge := func(name string) string {
@@ -1211,10 +1300,10 @@ func (m Model) renderDashboard() string {
 
 	b.WriteString(lipgloss.NewStyle().Width(panelWidth).Align(lipgloss.Center).Foreground(colorLabel).Render("ACCOUNTS") + "\n")
 	b.WriteString(thinLine() + "\n")
-	b.WriteString(fmt.Sprintf("    %s : %-4s %s\n", labelStyle.Render("SSH    "), warnStyle.Render(fmt.Sprintf("%d", len(m.snap.SSHAccounts))), mutedStyle.Render("active")))
-	b.WriteString(fmt.Sprintf("    %s : %-4s %s\n", labelStyle.Render("VMESS  "), warnStyle.Render(fmt.Sprintf("%d", len(m.snap.VMessAccs))), mutedStyle.Render("active")))
-	b.WriteString(fmt.Sprintf("    %s : %-4s %s\n", labelStyle.Render("VLESS  "), warnStyle.Render(fmt.Sprintf("%d", len(m.snap.VLESSAccs))), mutedStyle.Render("active")))
-	b.WriteString(fmt.Sprintf("    %s : %-4s %s\n", labelStyle.Render("TROJAN "), warnStyle.Render(fmt.Sprintf("%d", len(m.snap.TrojanAccs))), mutedStyle.Render("active")))
+	b.WriteString(fmt.Sprintf("    %s "+mutedStyle.Render(":")+" %-4s %s\n", labelStyle.Render("SSH    "), warnStyle.Render(fmt.Sprintf("%d", len(m.snap.SSHAccounts))), mutedStyle.Render("active")))
+	b.WriteString(fmt.Sprintf("    %s "+mutedStyle.Render(":")+" %-4s %s\n", labelStyle.Render("VMESS  "), warnStyle.Render(fmt.Sprintf("%d", len(m.snap.VMessAccs))), mutedStyle.Render("active")))
+	b.WriteString(fmt.Sprintf("    %s "+mutedStyle.Render(":")+" %-4s %s\n", labelStyle.Render("VLESS  "), warnStyle.Render(fmt.Sprintf("%d", len(m.snap.VLESSAccs))), mutedStyle.Render("active")))
+	b.WriteString(fmt.Sprintf("    %s "+mutedStyle.Render(":")+" %-4s %s\n", labelStyle.Render("TROJAN "), warnStyle.Render(fmt.Sprintf("%d", len(m.snap.TrojanAccs))), mutedStyle.Render("active")))
 	b.WriteString(mainLine() + "\n")
 
 	if m.notice != "" {

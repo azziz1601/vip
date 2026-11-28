@@ -407,13 +407,13 @@ END
 }
 netfilter-persistent
 clear
-echo -e "\033[1;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
-echo -e " \e[1;97;101m          UPDATE SCRIPT    \e[0m"
-echo -e "\033[1;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+echo -e "\033[38;2;71;85;105m────────────────────────────────────────────────\033[0m"
+echo -e "  \033[1;38;2;241;245;249mSYSTEM UPDATE\033[0m"
+echo -e "\033[38;2;71;85;105m────────────────────────────────────────────────\033[0m"
 echo -e ""
-echo -e "  \033[1;91m update script, zevpn-limit, udpgw-rs, ws-rs & xray-lite\033[1;37m"
+echo -e "  \033[38;2;203;213;225mUpdating panel, zevpn-limit, udpgw-rs, ws-rs & xray-lite...\033[0m"
 fun_bar 'res1'
-echo -e "\033[1;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+echo -e "\033[38;2;71;85;105m────────────────────────────────────────────────\033[0m"
 echo -e ""
 [[ -t 0 ]] || exit 0
 read -n 1 -s -r -p "Press [ Enter ] to back on menu" || exit 0
