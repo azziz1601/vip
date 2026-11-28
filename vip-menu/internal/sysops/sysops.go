@@ -1,7 +1,12 @@
 package sysops
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
+	"mime/multipart"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -219,9 +224,56 @@ func SetLimitSpeed(downMbps, upMbps int) string {
 	return fmt.Sprintf("Speed limit set on %s: %d Mbps down / %d Mbps up.", iface, downMbps, upMbps)
 }
 
-func BackupData() string {
+func ReadBotConfig() (string, string) {
+	b, err := os.ReadFile("/etc/bot/.bot.db")
+	if err != nil {
+		return "", ""
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		if strings.HasPrefix(line, "#bot# ") {
+			f := strings.Fields(line)
+			if len(f) >= 3 {
+				return f[1], f[2]
+			}
+		}
+	}
+	return "", ""
+}
+
+func AutoBackupStatus() string {
+	b, err := os.ReadFile("/etc/cron.d/vip_autobackup")
+	if err != nil {
+		return "Inactive"
+	}
+	if strings.Contains(string(b), "--backup-now") {
+		return "Active"
+	}
+	return "Inactive"
+}
+
+func removeLegacyBackupCrons() {
+	_ = os.Remove("/etc/cron.d/bckp_otm")
+	_ = os.Remove("/etc/cron.d/backup")
+}
+
+func BackupToTelegram() (string, error) {
+	token, chatID := ReadBotConfig()
+	if token == "" || chatID == "" {
+		return "", fmt.Errorf("Telegram bot token and chat ID are not configured")
+	}
+
+	domain := readTrimmed("/etc/xray/domain", "vps")
+	ip := readTrimmed("/etc/xray/ipvps", "-")
 	ts := time.Now().Format("2006-01-02-1504")
-	outFile := fmt.Sprintf("/root/vip-backup-%s.tar.gz", ts)
+	safeDom := strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '.' || r == '-' {
+			return r
+		}
+		return '-'
+	}, domain)
+	tmpFile := filepath.Join(os.TempDir(), fmt.Sprintf("vip-backup-%s-%s.tar.gz", safeDom, ts))
+	defer os.Remove(tmpFile)
+
 	targets := []string{
 		"/etc/passwd", "/etc/group", "/etc/shadow", "/etc/gshadow",
 		"/etc/xray/config.json", "/etc/xray/domain", "/etc/xray/dns",
@@ -234,16 +286,83 @@ func BackupData() string {
 			existing = append(existing, t)
 		}
 	}
-	args := append([]string{"-czf", outFile}, existing...)
+	if len(existing) == 0 {
+		return "", fmt.Errorf("no backup targets found")
+	}
+
+	args := append([]string{"-czf", tmpFile}, existing...)
 	if out, err := exec.Command("tar", args...).CombinedOutput(); err != nil {
-		return "Backup failed: " + strings.TrimSpace(string(out))
+		return "", fmt.Errorf("tar failed: %s", strings.TrimSpace(string(out)))
 	}
-	info, _ := os.Stat(outFile)
-	sizeKB := int64(0)
-	if info != nil {
-		sizeKB = info.Size() / 1024
+
+	info, err := os.Stat(tmpFile)
+	if err != nil {
+		return "", err
 	}
-	return fmt.Sprintf("Backup created successfully.\nFile : %s\nSize : %d KB", outFile, sizeKB)
+	sizeKB := info.Size() / 1024
+	if sizeKB == 0 && info.Size() > 0 {
+		sizeKB = 1
+	}
+
+	f, err := os.Open(tmpFile)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	_ = w.WriteField("chat_id", chatID)
+	_ = w.WriteField("parse_mode", "HTML")
+	caption := fmt.Sprintf("<b>VIP Backup</b>\n<code>Host : %s\nIP   : %s\nDate : %s\nSize : %d KB</code>", domain, ip, time.Now().Format("2006-01-02 15:04"), sizeKB)
+	_ = w.WriteField("caption", caption)
+	part, err := w.CreateFormFile("document", filepath.Base(tmpFile))
+	if err != nil {
+		return "", err
+	}
+	if _, err := io.Copy(part, f); err != nil {
+		return "", err
+	}
+	if err := w.Close(); err != nil {
+		return "", err
+	}
+
+	endpoint := "https://api.telegram.org/bot" + token + "/sendDocument"
+	req, err := http.NewRequest(http.MethodPost, endpoint, &body)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", w.FormDataContentType())
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("upload failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	respBytes, _ := io.ReadAll(resp.Body)
+	var tgResp struct {
+		OK          bool   `json:"ok"`
+		Description string `json:"description"`
+	}
+	_ = json.Unmarshal(respBytes, &tgResp)
+	if resp.StatusCode >= 300 || !tgResp.OK {
+		if tgResp.Description != "" {
+			return "", fmt.Errorf("Telegram API: %s", tgResp.Description)
+		}
+		return "", fmt.Errorf("Telegram HTTP %d", resp.StatusCode)
+	}
+
+	return fmt.Sprintf("Backup sent to Telegram.\nFile    : %s\nSize    : %d KB\nChat ID : %s\nLocal   : Cleaned", filepath.Base(tmpFile), sizeKB, chatID), nil
+}
+
+func BackupData() string {
+	res, err := BackupToTelegram()
+	if err != nil {
+		return "Backup failed: " + err.Error()
+	}
+	return res
 }
 
 func RestoreData(archivePath string) string {
@@ -263,20 +382,53 @@ func RestoreData(archivePath string) string {
 	return fmt.Sprintf("Restored successfully from %s.", archivePath)
 }
 
+func SetupTelegramAutoBackup(token, chatID string, hour int) string {
+	if err := ConfigureBotNotif(token, chatID); err != nil {
+		return "Failed to save bot config: " + err.Error()
+	}
+	if hour < 0 || hour > 23 {
+		hour = 2
+	}
+	removeLegacyBackupCrons()
+	cronFile := "/etc/cron.d/vip_autobackup"
+	cmd := fmt.Sprintf("0 %d * * * root /usr/local/bin/vip-menu --backup-now >/dev/null 2>&1", hour)
+	content := "SHELL=/bin/sh\nPATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin\n" + cmd + "\n"
+	if err := os.WriteFile(cronFile, []byte(content), 0644); err != nil {
+		return "Failed to schedule auto backup: " + err.Error()
+	}
+	_ = exec.Command("systemctl", "restart", "cron").Run()
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "Telegram auto backup enabled daily at %02d:00.\n", hour)
+	b.WriteString("────────────────────────────────────────────────────\n")
+	res, err := BackupToTelegram()
+	if err != nil {
+		b.WriteString("Initial backup failed: " + err.Error())
+	} else {
+		b.WriteString(res)
+	}
+	return b.String()
+}
+
 func ToggleAutoBackup(enable bool) string {
+	removeLegacyBackupCrons()
 	cronFile := "/etc/cron.d/vip_autobackup"
 	if !enable {
 		_ = os.Remove(cronFile)
 		_ = exec.Command("systemctl", "restart", "cron").Run()
 		return "Auto backup disabled."
 	}
-	cmd := `0 2 * * * root tar -czf /root/vip-backup-$(date +\%F).tar.gz /etc/passwd /etc/group /etc/shadow /etc/gshadow /etc/xray/config.json /etc/vmess /etc/vless /etc/trojan /etc/ssh /etc/kyt/limit /etc/bot /root/slowdns 2>/dev/null`
+	token, chatID := ReadBotConfig()
+	if token == "" || chatID == "" {
+		return "Telegram bot token and chat ID are not configured. Run Auto Backup Setup first."
+	}
+	cmd := "0 2 * * * root /usr/local/bin/vip-menu --backup-now >/dev/null 2>&1"
 	content := "SHELL=/bin/sh\nPATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin\n" + cmd + "\n"
 	if err := os.WriteFile(cronFile, []byte(content), 0644); err != nil {
 		return "Failed to schedule auto backup: " + err.Error()
 	}
 	_ = exec.Command("systemctl", "restart", "cron").Run()
-	return "Daily auto backup enabled at 02:00."
+	return "Daily Telegram auto backup enabled at 02:00."
 }
 
 func RunSpeedtest() string {

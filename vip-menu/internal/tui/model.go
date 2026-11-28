@@ -53,6 +53,7 @@ const (
 	formChangeDomain
 	formBotNotif
 	formLimitSpeed
+	formAutoBackup
 	formRestoreBackup
 )
 
@@ -255,12 +256,12 @@ func (m Model) itemsForCurrentView() []menuItem {
 		}
 	case viewBackup:
 		return []menuItem{
-			{Key: "1", Label: "Backup Data", Run: runReport("BACKUP", sysops.BackupData, viewBackup)},
-			{Key: "2", Label: "Restore Data", Run: openSysForm(formRestoreBackup, "RESTORE BACKUP", []formField{
-				{Label: "Archive Path ", Value: "/root/"},
+			{Key: "1", Label: "Backup to Telegram", Run: runReport("TELEGRAM BACKUP", sysops.BackupData, viewBackup)},
+			{Key: "2", Label: "Auto Backup Setup", Run: openAutoBackupForm()},
+			{Key: "3", Label: "Disable Auto Backup", Run: runReport("AUTO BACKUP", func() string { return sysops.ToggleAutoBackup(false) }, viewBackup)},
+			{Key: "4", Label: "Restore Data", Run: openSysForm(formRestoreBackup, "RESTORE BACKUP", []formField{
+				{Label: "Archive Path ", Value: "/tmp/"},
 			}, viewBackup)},
-			{Key: "3", Label: "Enable Auto Backup", Run: runReport("AUTO BACKUP", func() string { return sysops.ToggleAutoBackup(true) }, viewBackup)},
-			{Key: "4", Label: "Disable Auto Backup", Run: runReport("AUTO BACKUP", func() string { return sysops.ToggleAutoBackup(false) }, viewBackup)},
 			{Key: "0", Label: "Back", Run: goView(viewDashboard)},
 		}
 	case viewServices:
@@ -282,6 +283,24 @@ func (m Model) itemsForCurrentView() []menuItem {
 		}
 	}
 	return nil
+}
+
+func openAutoBackupForm() func(m *Model) tea.Cmd {
+	return func(m *Model) tea.Cmd {
+		token, chatID := sysops.ReadBotConfig()
+		m.view = viewForm
+		m.fMode = formAutoBackup
+		m.fTitle = "TELEGRAM AUTO BACKUP"
+		m.fBack = viewBackup
+		m.fFields = []formField{
+			{Label: "Bot Token    ", Value: token},
+			{Label: "Chat ID      ", Value: chatID},
+			{Label: "Daily Hour   ", Value: "2", Numeric: true},
+		}
+		m.fFocus = 0
+		m.notice = ""
+		return nil
+	}
 }
 
 func goView(v viewID) func(m *Model) tea.Cmd {
@@ -793,6 +812,16 @@ func (m Model) submitForm() (tea.Model, tea.Cmd) {
 		m.cursor = 0
 		return m, showInTerminal("LIMIT SPEED", res)
 
+	case formAutoBackup:
+		hour, err := strconv.Atoi(strings.TrimSpace(m.fFields[2].Value))
+		if err != nil {
+			hour = 2
+		}
+		res := sysops.SetupTelegramAutoBackup(m.fFields[0].Value, m.fFields[1].Value, hour)
+		m.view = viewBackup
+		m.cursor = 0
+		return m, showInTerminal("AUTO BACKUP", res)
+
 	case formRestoreBackup:
 		res := sysops.RestoreData(m.fFields[0].Value)
 		m.snap = sysinfo.Collect()
@@ -1100,7 +1129,19 @@ func (m Model) View() string {
 		b.WriteString(fmt.Sprintf("\n  %s  %s\n", titleStyle.Render(pTitle), mutedStyle.Render(fmt.Sprintf("%d accounts", len(m.currentAccounts())))))
 		b.WriteString(thinLine() + "\n")
 	} else if m.view == viewBackup {
-		b.WriteString("\n  " + titleStyle.Render("BACKUP & RESTORE") + "\n")
+		b.WriteString("\n  " + titleStyle.Render("TELEGRAM BACKUP") + "\n")
+		b.WriteString(thinLine() + "\n")
+		tok, cid := sysops.ReadBotConfig()
+		botState := errStyle.Render("Not Configured")
+		if tok != "" && cid != "" {
+			botState = okStyle.Render("Configured")
+		}
+		abState := mutedStyle.Render("Inactive")
+		if sysops.AutoBackupStatus() == "Active" {
+			abState = okStyle.Render("Active")
+		}
+		b.WriteString(fmt.Sprintf("  %s : %s\n", labelStyle.Render("Telegram Bot"), botState))
+		b.WriteString(fmt.Sprintf("  %s : %s\n", labelStyle.Render("Auto Backup "), abState))
 		b.WriteString(thinLine() + "\n")
 	} else if m.view == viewSystem {
 		b.WriteString("\n  " + titleStyle.Render("SYSTEM") + "\n")

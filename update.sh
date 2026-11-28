@@ -339,9 +339,9 @@ res1() {
     if curl -fsSL -H "Cache-Control: no-cache" "${RAW_REPO}limit/menu.zip?t=${ts}" -o /tmp/vip-menu-upd.zip || wget -q --no-cache -O /tmp/vip-menu-upd.zip "${RAW_REPO}limit/menu.zip?t=${ts}"; then
         unzip -o -q /tmp/vip-menu-upd.zip -d /tmp/vip-menu-upd
         chmod +x /tmp/vip-menu-upd/menu/*
-        rm -f /tmp/vip-menu-upd/menu/menu
+        rm -f /tmp/vip-menu-upd/menu/menu /tmp/vip-menu-upd/menu/autobackup /tmp/vip-menu-upd/menu/backer /tmp/vip-menu-upd/menu/backup /tmp/vip-menu-upd/menu/menu-backup /tmp/vip-menu-upd/menu/restore
         mv -f /tmp/vip-menu-upd/menu/* /usr/local/sbin/
-        rm -f /usr/local/sbin/{addss,cekss,delss,m-ssws,renewss,trialss,user-ss,menu-legacy,menu-rollback,menu-tui}
+        rm -f /usr/local/sbin/{addss,cekss,delss,m-ssws,renewss,trialss,user-ss,menu-legacy,menu-rollback,menu-tui,autobackup,backer,backup,menu-backup,restore}
         rm -f /etc/xray/.use-legacy-menu
         # Pasang/perbarui Go TUI vip-menu sebagai satu-satunya tampilan menu
         local m_arch m_url
@@ -382,6 +382,23 @@ res1() {
 
     # Pasang / sinkronkan SlowDNS (NS & Pub Key)
     sync_slowdns
+
+    # Hapus semua cron & file backup lokal agar tidak memenuhi disk; migrasikan ke Telegram backup
+    rm -f /etc/cron.d/bckp_otm /etc/cron.d/backup
+    rm -rf /root/backup /root/vip-backup-*.tar.gz
+    if [[ -f /etc/cron.d/vip_autobackup ]] && grep -q "tar -czf /root/vip-backup" /etc/cron.d/vip_autobackup; then
+        if grep -qE "^#bot# [^ ]+ [^ ]+" /etc/bot/.bot.db 2>/dev/null; then
+            cat >/etc/cron.d/vip_autobackup <<-END
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+0 2 * * * root /usr/local/bin/vip-menu --backup-now >/dev/null 2>&1
+END
+            chmod 644 /etc/cron.d/vip_autobackup
+        else
+            rm -f /etc/cron.d/vip_autobackup
+        fi
+        systemctl restart cron >/dev/null 2>&1 || true
+    fi
 
     # Sinkronisasi multi-transport (WS, gRPC, HTTPUpgrade, XHTTP) + migrasi akun lama
     sync_multi_transport_configs

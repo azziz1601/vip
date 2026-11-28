@@ -723,13 +723,36 @@ wget ${REPO}limit/openvpn &&  chmod +x openvpn && ./openvpn
 print_success "OpenVPN"
 }
 
+function setup_telegram_backup(){
+clear
+echo -e "────────────────────────────────────────────────────"
+echo -e "  TELEGRAM AUTO BACKUP SETUP"
+echo -e "────────────────────────────────────────────────────"
+read -rp "  Telegram Bot Token (Enter to skip) : " tg_bot_token
+read -rp "  Telegram Chat ID   (Enter to skip) : " tg_chat_id
+tg_bot_token="$(echo -n "$tg_bot_token" | xargs)"
+tg_chat_id="$(echo -n "$tg_chat_id" | xargs)"
+mkdir -p /etc/bot
+rm -f /etc/cron.d/bckp_otm /etc/cron.d/backup /etc/cron.d/vip_autobackup
+if [[ -n "$tg_bot_token" && -n "$tg_chat_id" ]]; then
+    printf "#bot# %s %s\n" "$tg_bot_token" "$tg_chat_id" > /etc/bot/.bot.db
+    chmod 600 /etc/bot/.bot.db
+    cat >/etc/cron.d/vip_autobackup <<-END
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+0 2 * * * root /usr/local/bin/vip-menu --backup-now >/dev/null 2>&1
+END
+    chmod 644 /etc/cron.d/vip_autobackup
+    print_success "Telegram Auto Backup (Daily 02:00)"
+else
+    touch /etc/bot/.bot.db
+    chmod 600 /etc/bot/.bot.db
+fi
+}
+
 function ins_backup(){
 clear
-print_install "Memasang Backup Server"
-#BackupOption
-apt install rclone -y
-printf "q\n" | rclone config
-wget -O /root/.config/rclone/rclone.conf "${REPO}limit/rclone.conf"
+print_install "Memasang Wondershaper & Firewall"
 #Install Wondershaper
 cd /bin
 git clone  https://github.com/magnific0/wondershaper.git
@@ -738,25 +761,9 @@ sudo make install
 cd
 rm -rf wondershaper
 echo > /home/limit
-apt install msmtp-mta ca-certificates bsd-mailx -y
-cat<<EOF>>/etc/msmtprc
-defaults
-tls on
-tls_starttls on
-tls_trust_file /etc/ssl/certs/ca-certificates.crt
-
-account default
-host smtp.gmail.com
-port 587
-auth on
-user oceantestdigital@gmail.com
-from oceantestdigital@gmail.com
-password jokerman77 
-logfile ~/.msmtp.log
-EOF
-chown -R www-data:www-data /etc/msmtprc
+rm -f /etc/cron.d/bckp_otm /etc/cron.d/backup
 wget -q -O /etc/ipserver "${REPO}limit/ipserver" && bash /etc/ipserver
-print_success "Backup Server"
+print_success "Wondershaper & Firewall"
 }
 
 clear
@@ -906,8 +913,9 @@ function menu(){
     wget -q --no-cache -O /tmp/menu.zip "${REPO}limit/menu.zip?t=$(date +%s)"
     unzip -o -q /tmp/menu.zip -d /tmp/vip-menu
     chmod +x /tmp/vip-menu/menu/*
-    rm -f /tmp/vip-menu/menu/menu
+    rm -f /tmp/vip-menu/menu/menu /tmp/vip-menu/menu/autobackup /tmp/vip-menu/menu/backer /tmp/vip-menu/menu/backup /tmp/vip-menu/menu/menu-backup /tmp/vip-menu/menu/restore
     mv -f /tmp/vip-menu/menu/* /usr/local/sbin/
+    rm -f /usr/local/sbin/{autobackup,backer,backup,menu-backup,restore}
     rm -rf /tmp/vip-menu /tmp/menu.zip
 
     local m_arch m_url
@@ -1033,6 +1041,7 @@ clear
     base_package
     make_folder_xray
     pasang_domain
+    setup_telegram_backup
     password_default
     pasang_ssl
     install_xray

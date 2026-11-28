@@ -8,10 +8,11 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/azziz1601/vip/vip-menu/internal/sysops"
 	"github.com/azziz1601/vip/vip-menu/internal/tui"
 )
 
-const version = "1.6.0"
+const version = "1.7.0"
 
 func main() {
 	if len(os.Args) > 1 {
@@ -22,8 +23,17 @@ func main() {
 		case "-h", "--help":
 			fmt.Printf("vip-menu v%s\n", version)
 			fmt.Println("Usage: menu")
-			fmt.Println("  -v, --version   Show version")
-			fmt.Println("  -h, --help      Show help")
+			fmt.Println("  -v, --version      Show version")
+			fmt.Println("  --backup-now       Run Telegram backup and exit")
+			fmt.Println("  -h, --help         Show help")
+			return
+		case "--backup-now":
+			res, err := sysops.BackupToTelegram()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "backup error: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Println(res)
 			return
 		}
 	}
